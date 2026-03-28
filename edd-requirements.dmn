@@ -1,0 +1,281 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="https://www.omg.org/spec/DMN/20191111/MODEL/"
+             xmlns:dmndi="https://www.omg.org/spec/DMN/20191111/DMNDI/"
+             xmlns:dc="http://www.omg.org/spec/DMN/20180521/DC/"
+             xmlns:di="http://www.omg.org/spec/DMN/20180521/DI/"
+             xmlns:camunda="http://camunda.org/schema/1.0/dmn"
+             id="edd_requirements_definitions"
+             name="EDD Requirements Determination"
+             namespace="http://camunda.org/schema/1.0/dmn"
+             exporter="Camunda Modeler"
+             exporterVersion="5.20.0">
+
+  <!-- ============================================================
+       EDD REQUIREMENTS DETERMINATION
+       
+       For clients classified as HIGH risk by the Risk Tier 
+       Classification, this table determines the specific Enhanced 
+       Due Diligence measures required under the AMLR.
+       
+       Hit Policy: COLLECT (multiple rules can fire — all applicable 
+       EDD measures are collected and returned as a list)
+       
+       This reflects the AMLR approach where multiple EDD triggers 
+       can co-exist for a single client relationship.
+       ============================================================ -->
+
+  <decision id="edd_requirements" name="EDD Requirements Determination">
+    <informationRequirement id="ir_from_risk">
+      <requiredDecision href="#risk_tier_classification" />
+    </informationRequirement>
+
+    <decisionTable id="dt_edd_requirements" hitPolicy="COLLECT">
+
+      <!-- ==================== INPUTS ==================== -->
+
+      <!-- Risk tier from upstream decision (this table only applies to HIGH) -->
+      <input id="input_risk_tier" label="Risk Tier" camunda:inputVariable="riskTier">
+        <inputExpression id="ie_risk_tier" typeRef="string">
+          <text>riskTier</text>
+        </inputExpression>
+      </input>
+
+      <!-- Specific risk triggers that determine which EDD measures apply -->
+      <input id="input_pep" label="PEP Flag" camunda:inputVariable="pepFlag">
+        <inputExpression id="ie_pep" typeRef="boolean">
+          <text>pepFlag</text>
+        </inputExpression>
+      </input>
+
+      <input id="input_hrj" label="High-Risk Jurisdiction" camunda:inputVariable="highRiskJurisdiction">
+        <inputExpression id="ie_hrj" typeRef="boolean">
+          <text>highRiskJurisdiction</text>
+        </inputExpression>
+      </input>
+
+      <input id="input_complex" label="Complex Structure" camunda:inputVariable="complexStructure">
+        <inputExpression id="ie_complex" typeRef="boolean">
+          <text>complexStructure</text>
+        </inputExpression>
+      </input>
+
+      <input id="input_high_value" label="High Value (Assets >= 5M)" camunda:inputVariable="highValueRelationship">
+        <inputExpression id="ie_high_value" typeRef="boolean">
+          <text>highValueRelationship</text>
+        </inputExpression>
+      </input>
+
+      <input id="input_correspondent" label="Correspondent Banking" camunda:inputVariable="correspondentBanking">
+        <inputExpression id="ie_correspondent" typeRef="boolean">
+          <text>correspondentBanking</text>
+        </inputExpression>
+      </input>
+
+      <input id="input_ubo_fallback" label="UBO Fallback Applied" camunda:inputVariable="uboFallbackApplied">
+        <inputExpression id="ie_ubo_fallback" typeRef="boolean">
+          <text>uboFallbackApplied</text>
+        </inputExpression>
+      </input>
+
+      <!-- ==================== OUTPUTS ==================== -->
+
+      <output id="output_edd_measure" label="EDD Measure" name="eddMeasure" typeRef="string" />
+      <output id="output_edd_category" label="EDD Category" name="eddCategory" typeRef="string" />
+      <output id="output_review_frequency" label="Review Frequency" name="reviewFrequency" typeRef="string" />
+
+      <!-- ==================== RULES ==================== 
+           COLLECT policy: all matching rules fire, building a complete 
+           list of required EDD measures for the client -->
+
+      <!-- EDD-1: Source of Funds verification (all HIGH risk) -->
+      <rule id="edd_rule_1">
+        <description>AMLR: All EDD cases require source of funds verification</description>
+        <inputEntry id="e1_ie1"><text>"HIGH"</text></inputEntry>
+        <inputEntry id="e1_ie2"><text>-</text></inputEntry>
+        <inputEntry id="e1_ie3"><text>-</text></inputEntry>
+        <inputEntry id="e1_ie4"><text>-</text></inputEntry>
+        <inputEntry id="e1_ie5"><text>-</text></inputEntry>
+        <inputEntry id="e1_ie6"><text>-</text></inputEntry>
+        <inputEntry id="e1_ie7"><text>-</text></inputEntry>
+        <outputEntry id="e1_oe1"><text>"Obtain and verify source of funds for the business relationship"</text></outputEntry>
+        <outputEntry id="e1_oe2"><text>"SOURCE_OF_FUNDS"</text></outputEntry>
+        <outputEntry id="e1_oe3"><text>"ANNUAL"</text></outputEntry>
+      </rule>
+
+      <!-- EDD-2: Source of Wealth verification (all HIGH risk) -->
+      <rule id="edd_rule_2">
+        <description>AMLR: All EDD cases require source of wealth verification</description>
+        <inputEntry id="e2_ie1"><text>"HIGH"</text></inputEntry>
+        <inputEntry id="e2_ie2"><text>-</text></inputEntry>
+        <inputEntry id="e2_ie3"><text>-</text></inputEntry>
+        <inputEntry id="e2_ie4"><text>-</text></inputEntry>
+        <inputEntry id="e2_ie5"><text>-</text></inputEntry>
+        <inputEntry id="e2_ie6"><text>-</text></inputEntry>
+        <inputEntry id="e2_ie7"><text>-</text></inputEntry>
+        <outputEntry id="e2_oe1"><text>"Obtain and verify source of wealth of customer and beneficial owner(s)"</text></outputEntry>
+        <outputEntry id="e2_oe2"><text>"SOURCE_OF_WEALTH"</text></outputEntry>
+        <outputEntry id="e2_oe3"><text>"ANNUAL"</text></outputEntry>
+      </rule>
+
+      <!-- EDD-3: Senior management approval (all HIGH risk) -->
+      <rule id="edd_rule_3">
+        <description>AMLR: Senior management approval required to establish or continue relationship</description>
+        <inputEntry id="e3_ie1"><text>"HIGH"</text></inputEntry>
+        <inputEntry id="e3_ie2"><text>-</text></inputEntry>
+        <inputEntry id="e3_ie3"><text>-</text></inputEntry>
+        <inputEntry id="e3_ie4"><text>-</text></inputEntry>
+        <inputEntry id="e3_ie5"><text>-</text></inputEntry>
+        <inputEntry id="e3_ie6"><text>-</text></inputEntry>
+        <inputEntry id="e3_ie7"><text>-</text></inputEntry>
+        <outputEntry id="e3_oe1"><text>"Obtain senior management approval to establish or continue the relationship"</text></outputEntry>
+        <outputEntry id="e3_oe2"><text>"SENIOR_MGMT_APPROVAL"</text></outputEntry>
+        <outputEntry id="e3_oe3"><text>"AT_ONBOARDING_AND_ANNUAL"</text></outputEntry>
+      </rule>
+
+      <!-- EDD-4: Enhanced transaction monitoring (all HIGH risk) -->
+      <rule id="edd_rule_4">
+        <description>AMLR: Increased monitoring frequency and controls for HIGH risk relationships</description>
+        <inputEntry id="e4_ie1"><text>"HIGH"</text></inputEntry>
+        <inputEntry id="e4_ie2"><text>-</text></inputEntry>
+        <inputEntry id="e4_ie3"><text>-</text></inputEntry>
+        <inputEntry id="e4_ie4"><text>-</text></inputEntry>
+        <inputEntry id="e4_ie5"><text>-</text></inputEntry>
+        <inputEntry id="e4_ie6"><text>-</text></inputEntry>
+        <inputEntry id="e4_ie7"><text>-</text></inputEntry>
+        <outputEntry id="e4_oe1"><text>"Apply enhanced ongoing monitoring — increase number and timing of controls"</text></outputEntry>
+        <outputEntry id="e4_oe2"><text>"ENHANCED_MONITORING"</text></outputEntry>
+        <outputEntry id="e4_oe3"><text>"QUARTERLY"</text></outputEntry>
+      </rule>
+
+      <!-- EDD-5: PEP-specific — verify public function and political exposure -->
+      <rule id="edd_rule_5">
+        <description>AMLR: PEP-specific measures — verify nature of public function and political exposure</description>
+        <inputEntry id="e5_ie1"><text>"HIGH"</text></inputEntry>
+        <inputEntry id="e5_ie2"><text>true</text></inputEntry>
+        <inputEntry id="e5_ie3"><text>-</text></inputEntry>
+        <inputEntry id="e5_ie4"><text>-</text></inputEntry>
+        <inputEntry id="e5_ie5"><text>-</text></inputEntry>
+        <inputEntry id="e5_ie6"><text>-</text></inputEntry>
+        <inputEntry id="e5_ie7"><text>-</text></inputEntry>
+        <outputEntry id="e5_oe1"><text>"Verify PEP status, nature of public function, and screen family members and known close associates"</text></outputEntry>
+        <outputEntry id="e5_oe2"><text>"PEP_SCREENING"</text></outputEntry>
+        <outputEntry id="e5_oe3"><text>"QUARTERLY"</text></outputEntry>
+      </rule>
+
+      <!-- EDD-6: PEP-specific — continue monitoring 12 months post-function -->
+      <rule id="edd_rule_6">
+        <description>AMLR: EDD must continue for minimum 12 months after PEP leaves public function</description>
+        <inputEntry id="e6_ie1"><text>"HIGH"</text></inputEntry>
+        <inputEntry id="e6_ie2"><text>true</text></inputEntry>
+        <inputEntry id="e6_ie3"><text>-</text></inputEntry>
+        <inputEntry id="e6_ie4"><text>-</text></inputEntry>
+        <inputEntry id="e6_ie5"><text>-</text></inputEntry>
+        <inputEntry id="e6_ie6"><text>-</text></inputEntry>
+        <inputEntry id="e6_ie7"><text>-</text></inputEntry>
+        <outputEntry id="e6_oe1"><text>"Flag for continued EDD monitoring — minimum 12 months after individual ceases public function"</text></outputEntry>
+        <outputEntry id="e6_oe2"><text>"PEP_POST_FUNCTION_MONITORING"</text></outputEntry>
+        <outputEntry id="e6_oe3"><text>"QUARTERLY_POST_FUNCTION"</text></outputEntry>
+      </rule>
+
+      <!-- EDD-7: High-risk jurisdiction — additional country risk measures -->
+      <rule id="edd_rule_7">
+        <description>AMLR: Additional measures for high-risk third country relationships</description>
+        <inputEntry id="e7_ie1"><text>"HIGH"</text></inputEntry>
+        <inputEntry id="e7_ie2"><text>-</text></inputEntry>
+        <inputEntry id="e7_ie3"><text>true</text></inputEntry>
+        <inputEntry id="e7_ie4"><text>-</text></inputEntry>
+        <inputEntry id="e7_ie5"><text>-</text></inputEntry>
+        <inputEntry id="e7_ie6"><text>-</text></inputEntry>
+        <inputEntry id="e7_ie7"><text>-</text></inputEntry>
+        <outputEntry id="e7_oe1"><text>"Obtain additional information on purpose of business relationship and reasons for transactions with high-risk jurisdiction"</text></outputEntry>
+        <outputEntry id="e7_oe2"><text>"HIGH_RISK_JURISDICTION_REVIEW"</text></outputEntry>
+        <outputEntry id="e7_oe3"><text>"SEMI_ANNUAL"</text></outputEntry>
+      </rule>
+
+      <!-- EDD-8: Complex structure — ownership chain mapping -->
+      <rule id="edd_rule_8">
+        <description>Map and document full ownership chain for complex/multi-layered structures</description>
+        <inputEntry id="e8_ie1"><text>"HIGH"</text></inputEntry>
+        <inputEntry id="e8_ie2"><text>-</text></inputEntry>
+        <inputEntry id="e8_ie3"><text>-</text></inputEntry>
+        <inputEntry id="e8_ie4"><text>true</text></inputEntry>
+        <inputEntry id="e8_ie5"><text>-</text></inputEntry>
+        <inputEntry id="e8_ie6"><text>-</text></inputEntry>
+        <inputEntry id="e8_ie7"><text>-</text></inputEntry>
+        <outputEntry id="e8_oe1"><text>"Map and document full ownership chain — verify each layer against BO registers where available"</text></outputEntry>
+        <outputEntry id="e8_oe2"><text>"OWNERSHIP_CHAIN_MAPPING"</text></outputEntry>
+        <outputEntry id="e8_oe3"><text>"ANNUAL"</text></outputEntry>
+      </rule>
+
+      <!-- EDD-9: High value — additional financial scrutiny -->
+      <rule id="edd_rule_9">
+        <description>AMLR: Relationships >= EUR 5M require enhanced financial scrutiny</description>
+        <inputEntry id="e9_ie1"><text>"HIGH"</text></inputEntry>
+        <inputEntry id="e9_ie2"><text>-</text></inputEntry>
+        <inputEntry id="e9_ie3"><text>-</text></inputEntry>
+        <inputEntry id="e9_ie4"><text>-</text></inputEntry>
+        <inputEntry id="e9_ie5"><text>true</text></inputEntry>
+        <inputEntry id="e9_ie6"><text>-</text></inputEntry>
+        <inputEntry id="e9_ie7"><text>-</text></inputEntry>
+        <outputEntry id="e9_oe1"><text>"Verify alignment of transaction patterns with stated purpose — apply enhanced financial scrutiny"</text></outputEntry>
+        <outputEntry id="e9_oe2"><text>"HIGH_VALUE_SCRUTINY"</text></outputEntry>
+        <outputEntry id="e9_oe3"><text>"QUARTERLY"</text></outputEntry>
+      </rule>
+
+      <!-- EDD-10: Correspondent banking — specific AMLR requirements -->
+      <rule id="edd_rule_10">
+        <description>AMLR: Correspondent banking relationships subject to specific EDD obligations</description>
+        <inputEntry id="e10_ie1"><text>"HIGH"</text></inputEntry>
+        <inputEntry id="e10_ie2"><text>-</text></inputEntry>
+        <inputEntry id="e10_ie3"><text>-</text></inputEntry>
+        <inputEntry id="e10_ie4"><text>-</text></inputEntry>
+        <inputEntry id="e10_ie5"><text>-</text></inputEntry>
+        <inputEntry id="e10_ie6"><text>true</text></inputEntry>
+        <inputEntry id="e10_ie7"><text>-</text></inputEntry>
+        <outputEntry id="e10_oe1"><text>"Assess respondent institution AML/CFT controls — verify no shell bank involvement — obtain senior management approval"</text></outputEntry>
+        <outputEntry id="e10_oe2"><text>"CORRESPONDENT_BANKING_EDD"</text></outputEntry>
+        <outputEntry id="e10_oe3"><text>"ANNUAL"</text></outputEntry>
+      </rule>
+
+      <!-- EDD-11: UBO fallback — additional documentation requirements -->
+      <rule id="edd_rule_11">
+        <description>AMLR: Where UBO fallback applied, maintain detailed audit trail of all steps taken</description>
+        <inputEntry id="e11_ie1"><text>"HIGH"</text></inputEntry>
+        <inputEntry id="e11_ie2"><text>-</text></inputEntry>
+        <inputEntry id="e11_ie3"><text>-</text></inputEntry>
+        <inputEntry id="e11_ie4"><text>-</text></inputEntry>
+        <inputEntry id="e11_ie5"><text>-</text></inputEntry>
+        <inputEntry id="e11_ie6"><text>-</text></inputEntry>
+        <inputEntry id="e11_ie7"><text>true</text></inputEntry>
+        <outputEntry id="e11_oe1"><text>"Maintain full audit trail of UBO identification attempts — document why no UBO could be identified — record senior managing official details"</text></outputEntry>
+        <outputEntry id="e11_oe2"><text>"UBO_FALLBACK_DOCUMENTATION"</text></outputEntry>
+        <outputEntry id="e11_oe3"><text>"SEMI_ANNUAL"</text></outputEntry>
+      </rule>
+
+      <!-- EDD-12: Register cross-check (all HIGH risk) -->
+      <rule id="edd_rule_12">
+        <description>AMLR: Cross-check all BO information against central registers and report discrepancies</description>
+        <inputEntry id="e12_ie1"><text>"HIGH"</text></inputEntry>
+        <inputEntry id="e12_ie2"><text>-</text></inputEntry>
+        <inputEntry id="e12_ie3"><text>-</text></inputEntry>
+        <inputEntry id="e12_ie4"><text>-</text></inputEntry>
+        <inputEntry id="e12_ie5"><text>-</text></inputEntry>
+        <inputEntry id="e12_ie6"><text>-</text></inputEntry>
+        <inputEntry id="e12_ie7"><text>-</text></inputEntry>
+        <outputEntry id="e12_oe1"><text>"Cross-check client BO information against EU central registers — report any discrepancies to register authority"</text></outputEntry>
+        <outputEntry id="e12_oe2"><text>"REGISTER_CROSS_CHECK"</text></outputEntry>
+        <outputEntry id="e12_oe3"><text>"ANNUAL"</text></outputEntry>
+      </rule>
+
+    </decisionTable>
+  </decision>
+
+  <dmndi:DMNDI>
+    <dmndi:DMNDiagram id="DMNDiagram_edd">
+      <dmndi:DMNShape id="DMNShape_edd_requirements" dmnElementRef="edd_requirements">
+        <dc:Bounds height="80" width="180" x="160" y="100" />
+      </dmndi:DMNShape>
+    </dmndi:DMNDiagram>
+  </dmndi:DMNDI>
+
+</definitions>

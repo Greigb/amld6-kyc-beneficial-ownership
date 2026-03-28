@@ -1,0 +1,193 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="https://www.omg.org/spec/DMN/20191111/MODEL/"
+             xmlns:dmndi="https://www.omg.org/spec/DMN/20191111/DMNDI/"
+             xmlns:dc="http://www.omg.org/spec/DMN/20180521/DC/"
+             xmlns:di="http://www.omg.org/spec/DMN/20180521/DI/"
+             xmlns:camunda="http://camunda.org/schema/1.0/dmn"
+             id="kyc_bo_rescreening_drd"
+             name="KYC Beneficial Ownership Re-screening — Decision Requirement Diagram"
+             namespace="http://camunda.org/schema/1.0/dmn"
+             exporter="Camunda Modeler"
+             exporterVersion="5.20.0">
+
+  <!-- ============================================================
+       DECISION REQUIREMENT DIAGRAM (DRD)
+       
+       EU AML Package — KYC Beneficial Ownership Re-screening
+       
+       This DRD models the decision chain for a CIB bank evaluating
+       its client portfolio against the AMLR (Regulation (EU) 2024/1624)
+       and AMLD6 (Directive (EU) 2024/1640) requirements.
+       
+       Decision Flow:
+       
+         [Input Data]
+              │
+              ▼
+         ┌─────────────────────────────┐
+         │  1. BO Assessment           │  Hit Policy: FIRST
+         │  (Ownership + Control Test)  │
+         └──────────────┬──────────────┘
+                        │
+                        ▼
+         ┌─────────────────────────────┐
+         │  2. Risk Tier Classification │  Hit Policy: PRIORITY
+         │  (CDD Level Determination)   │
+         └──────────────┬──────────────┘
+                        │
+                        ▼
+         ┌─────────────────────────────┐
+         │  3. EDD Requirements        │  Hit Policy: COLLECT
+         │  (Specific Measures)         │  (only if HIGH risk)
+         └─────────────────────────────┘
+       
+       ============================================================ -->
+
+  <!-- ==================== INPUT DATA NODES ==================== -->
+
+  <inputData id="id_customer_data" name="Customer Data">
+    <!-- Ownership %, entity type, jurisdiction -->
+  </inputData>
+
+  <inputData id="id_control_indicators" name="Control Indicators">
+    <!-- Veto rights, director appointment, dominant influence flags -->
+  </inputData>
+
+  <inputData id="id_risk_factors" name="Risk Factors">
+    <!-- PEP flag, high-risk jurisdiction, complex structure, asset values -->
+  </inputData>
+
+  <inputData id="id_relationship_data" name="Relationship Data">
+    <!-- Correspondent banking flag, product types -->
+  </inputData>
+
+  <!-- ==================== DECISION 1: BO ASSESSMENT ==================== -->
+
+  <decision id="bo_assessment" name="Beneficial Ownership Assessment">
+    <informationRequirement id="ir_customer_data">
+      <requiredInput href="#id_customer_data" />
+    </informationRequirement>
+    <informationRequirement id="ir_control_indicators">
+      <requiredInput href="#id_control_indicators" />
+    </informationRequirement>
+
+    <decisionTable id="dt_bo_stub" hitPolicy="FIRST">
+      <input id="stub_i1"><inputExpression typeRef="double"><text>ownershipPct</text></inputExpression></input>
+      <output id="stub_o1" name="uboIdentified" typeRef="boolean" />
+      <output id="stub_o2" name="identificationMethod" typeRef="string" />
+      <output id="stub_o3" name="applicableThreshold" typeRef="double" />
+      <!-- Full rules in bo-assessment.dmn -->
+    </decisionTable>
+  </decision>
+
+  <!-- ==================== DECISION 2: RISK TIER ==================== -->
+
+  <decision id="risk_tier_classification" name="Risk Tier Classification">
+    <informationRequirement id="ir_from_bo_assessment">
+      <requiredDecision href="#bo_assessment" />
+    </informationRequirement>
+    <informationRequirement id="ir_risk_factors">
+      <requiredInput href="#id_risk_factors" />
+    </informationRequirement>
+
+    <decisionTable id="dt_risk_stub" hitPolicy="PRIORITY">
+      <input id="stub_ri1"><inputExpression typeRef="boolean"><text>uboIdentified</text></inputExpression></input>
+      <output id="stub_ro1" name="riskTier" typeRef="string" />
+      <output id="stub_ro2" name="cddLevel" typeRef="string" />
+      <output id="stub_ro3" name="riskRationale" typeRef="string" />
+      <!-- Full rules in risk-tier-classification.dmn -->
+    </decisionTable>
+  </decision>
+
+  <!-- ==================== DECISION 3: EDD REQUIREMENTS ==================== -->
+
+  <decision id="edd_requirements" name="EDD Requirements Determination">
+    <informationRequirement id="ir_from_risk_tier">
+      <requiredDecision href="#risk_tier_classification" />
+    </informationRequirement>
+    <informationRequirement id="ir_relationship_data">
+      <requiredInput href="#id_relationship_data" />
+    </informationRequirement>
+
+    <decisionTable id="dt_edd_stub" hitPolicy="COLLECT">
+      <input id="stub_ei1"><inputExpression typeRef="string"><text>riskTier</text></inputExpression></input>
+      <output id="stub_eo1" name="eddMeasure" typeRef="string" />
+      <output id="stub_eo2" name="eddCategory" typeRef="string" />
+      <output id="stub_eo3" name="reviewFrequency" typeRef="string" />
+      <!-- Full rules in edd-requirements.dmn -->
+    </decisionTable>
+  </decision>
+
+  <!-- ==================== DRD VISUAL LAYOUT ==================== -->
+
+  <dmndi:DMNDI>
+    <dmndi:DMNDiagram id="DMNDiagram_DRD" name="KYC BO Re-screening DRD">
+
+      <!-- Input Data shapes (bottom row) -->
+      <dmndi:DMNShape id="shape_customer_data" dmnElementRef="id_customer_data">
+        <dc:Bounds height="45" width="125" x="57" y="490" />
+      </dmndi:DMNShape>
+
+      <dmndi:DMNShape id="shape_control_indicators" dmnElementRef="id_control_indicators">
+        <dc:Bounds height="45" width="125" x="227" y="490" />
+      </dmndi:DMNShape>
+
+      <dmndi:DMNShape id="shape_risk_factors" dmnElementRef="id_risk_factors">
+        <dc:Bounds height="45" width="125" x="397" y="490" />
+      </dmndi:DMNShape>
+
+      <dmndi:DMNShape id="shape_relationship_data" dmnElementRef="id_relationship_data">
+        <dc:Bounds height="45" width="125" x="567" y="490" />
+      </dmndi:DMNShape>
+
+      <!-- Decision 1: BO Assessment (bottom decision) -->
+      <dmndi:DMNShape id="shape_bo_assessment" dmnElementRef="bo_assessment">
+        <dc:Bounds height="80" width="180" x="100" y="340" />
+      </dmndi:DMNShape>
+
+      <!-- Decision 2: Risk Tier (middle decision) -->
+      <dmndi:DMNShape id="shape_risk_tier" dmnElementRef="risk_tier_classification">
+        <dc:Bounds height="80" width="180" x="270" y="200" />
+      </dmndi:DMNShape>
+
+      <!-- Decision 3: EDD Requirements (top decision) -->
+      <dmndi:DMNShape id="shape_edd_requirements" dmnElementRef="edd_requirements">
+        <dc:Bounds height="80" width="180" x="270" y="60" />
+      </dmndi:DMNShape>
+
+      <!-- Edges: Input Data → Decisions -->
+      <dmndi:DMNEdge id="edge_customer_to_bo" dmnElementRef="ir_customer_data">
+        <di:waypoint x="119" y="490" />
+        <di:waypoint x="160" y="420" />
+      </dmndi:DMNEdge>
+
+      <dmndi:DMNEdge id="edge_control_to_bo" dmnElementRef="ir_control_indicators">
+        <di:waypoint x="289" y="490" />
+        <di:waypoint x="220" y="420" />
+      </dmndi:DMNEdge>
+
+      <dmndi:DMNEdge id="edge_risk_to_tier" dmnElementRef="ir_risk_factors">
+        <di:waypoint x="459" y="490" />
+        <di:waypoint x="400" y="280" />
+      </dmndi:DMNEdge>
+
+      <dmndi:DMNEdge id="edge_rel_to_edd" dmnElementRef="ir_relationship_data">
+        <di:waypoint x="629" y="490" />
+        <di:waypoint x="450" y="100" />
+      </dmndi:DMNEdge>
+
+      <!-- Edges: Decision → Decision -->
+      <dmndi:DMNEdge id="edge_bo_to_risk" dmnElementRef="ir_from_bo_assessment">
+        <di:waypoint x="220" y="340" />
+        <di:waypoint x="310" y="280" />
+      </dmndi:DMNEdge>
+
+      <dmndi:DMNEdge id="edge_risk_to_edd" dmnElementRef="ir_from_risk_tier">
+        <di:waypoint x="360" y="200" />
+        <di:waypoint x="360" y="140" />
+      </dmndi:DMNEdge>
+
+    </dmndi:DMNDiagram>
+  </dmndi:DMNDI>
+
+</definitions>

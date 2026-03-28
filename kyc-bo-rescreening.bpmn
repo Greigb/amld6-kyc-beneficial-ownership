@@ -1,0 +1,720 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+                  xmlns:camunda="http://camunda.org/schema/1.0/bpmn"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  id="Definitions_1"
+                  targetNamespace="http://bpmn.io/schema/bpmn"
+                  exporter="Camunda Modeler"
+                  exporterVersion="5.20.0">
+
+  <!-- ============================================================
+       KYC BENEFICIAL OWNERSHIP RE-SCREENING PROCESS
+       
+       Triggered by the EU AML Package (AMLR / AMLD6) regulatory 
+       change, this process models a CIB bank's portfolio-wide 
+       re-screening of existing clients against updated beneficial 
+       ownership and CDD requirements.
+       
+       The process integrates three DMN decision tables:
+         1. Beneficial Ownership Assessment
+         2. Risk Tier Classification  
+         3. EDD Requirements Determination
+       
+       Process Flow:
+         Reg Change Signal → Extract Client Data → BO Assessment →
+         Risk Classification → Route by Tier → 
+           HIGH: EDD Sub-process → Compliance Review → Approve/Reject
+           MEDIUM: Analyst Review → Approve/Escalate
+           LOW: Auto-approve with Audit Log
+         → Update KYC Record → End
+       ============================================================ -->
+
+  <bpmn:process id="kyc_bo_rescreening" name="KYC Beneficial Ownership Re-screening" isExecutable="true">
+
+    <!-- ==================== PHASE 1: TRIGGER ==================== -->
+
+    <!-- Signal start: regulatory change notification triggers portfolio re-screen -->
+    <bpmn:startEvent id="start_reg_change" name="Regulatory Change&#10;Notification Received">
+      <bpmn:documentation>
+        AMLR (Regulation (EU) 2024/1624) and AMLD6 (Directive (EU) 2024/1640) 
+        entered into force. The bank must re-evaluate its existing client portfolio 
+        against updated BO identification rules, CDD thresholds, and EDD triggers.
+        Applicable from 10 July 2027.
+      </bpmn:documentation>
+      <bpmn:outgoing>flow_start_to_extract</bpmn:outgoing>
+      <bpmn:signalEventDefinition id="signal_reg_change" signalRef="sig_amlr_change" />
+    </bpmn:startEvent>
+
+    <!-- ==================== PHASE 2: DATA EXTRACTION ==================== -->
+
+    <bpmn:serviceTask id="task_extract_client_data" name="Extract Client&#10;Ownership Data" camunda:delegateExpression="${extractClientDataDelegate}">
+      <bpmn:documentation>
+        Pull current client data from core banking / KYC systems:
+        - Ownership structure and percentages (direct and indirect)
+        - Entity type (corporate, trust, SPV, partnership, foundation)
+        - Jurisdiction of incorporation and operations
+        - Control indicators (board appointments, veto rights, shareholder agreements)
+        - Current PEP screening results
+        - Asset values and net worth data
+        - Product/relationship type (including correspondent banking flag)
+      </bpmn:documentation>
+      <bpmn:incoming>flow_start_to_extract</bpmn:incoming>
+      <bpmn:outgoing>flow_extract_to_register</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="task_register_crosscheck" name="Cross-Check&#10;BO Registers" camunda:delegateExpression="${registerCrossCheckDelegate}">
+      <bpmn:documentation>
+        AMLR requirement: Cross-check client-declared beneficial ownership 
+        information against national and EU central BO registers.
+        
+        - Query applicable Member State central register(s)
+        - Compare declared ownership vs registered ownership
+        - Flag any discrepancies for downstream handling
+        - Record cross-check timestamp and results for audit trail
+        
+        Note: Interconnected registers via European Central Platform 
+        expected by 2029 (AMLD6 Art. transposition schedule).
+      </bpmn:documentation>
+      <bpmn:incoming>flow_extract_to_register</bpmn:incoming>
+      <bpmn:outgoing>flow_register_to_discrepancy</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <!-- Gateway: Were discrepancies found in register cross-check? -->
+    <bpmn:exclusiveGateway id="gw_discrepancy_check" name="Register&#10;Discrepancies?">
+      <bpmn:incoming>flow_register_to_discrepancy</bpmn:incoming>
+      <bpmn:outgoing>flow_discrepancy_yes</bpmn:outgoing>
+      <bpmn:outgoing>flow_discrepancy_no</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <!-- If discrepancies: report to register authority before proceeding -->
+    <bpmn:serviceTask id="task_report_discrepancy" name="Report Discrepancy&#10;to Register Authority" camunda:delegateExpression="${reportDiscrepancyDelegate}">
+      <bpmn:documentation>
+        AMLR mandate: Where discrepancies are identified between client-provided 
+        BO information and central register data, the obliged entity must report 
+        the discrepancy to the entity in charge of the register.
+      </bpmn:documentation>
+      <bpmn:incoming>flow_discrepancy_yes</bpmn:incoming>
+      <bpmn:outgoing>flow_discrepancy_to_bo</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <!-- ==================== PHASE 3: DMN DECISION CHAIN ==================== -->
+
+    <!-- Business Rule Task 1: Beneficial Ownership Assessment -->
+    <bpmn:businessRuleTask id="task_bo_assessment" name="Assess Beneficial&#10;Ownership" camunda:resultVariable="boAssessmentResult" camunda:decisionRef="bo_assessment" camunda:mapDecisionResult="singleResult">
+      <bpmn:documentation>
+        DMN Decision Table: bo-assessment.dmn
+        Hit Policy: FIRST
+        
+        Applies the AMLR dual-test framework:
+        1. Ownership test (25% standard / 15% delegated act for high-risk sectors)
+        2. Control-via-other-means test (veto, director appointment, dominant influence)
+        3. Fallback to senior managing official if both tests exhausted
+        
+        Outputs: uboIdentified (boolean), identificationMethod (string), applicableThreshold (double)
+      </bpmn:documentation>
+      <bpmn:incoming>flow_discrepancy_no</bpmn:incoming>
+      <bpmn:incoming>flow_discrepancy_to_bo</bpmn:incoming>
+      <bpmn:outgoing>flow_bo_to_risk</bpmn:outgoing>
+    </bpmn:businessRuleTask>
+
+    <!-- Business Rule Task 2: Risk Tier Classification -->
+    <bpmn:businessRuleTask id="task_risk_classification" name="Classify&#10;Risk Tier" camunda:resultVariable="riskClassificationResult" camunda:decisionRef="risk_tier_classification" camunda:mapDecisionResult="singleResult">
+      <bpmn:documentation>
+        DMN Decision Table: risk-tier-classification.dmn
+        Hit Policy: PRIORITY
+        
+        Evaluates inherent risk factors per AMLR Annex III:
+        - PEP involvement (mandatory HIGH)
+        - High-risk third country jurisdiction (mandatory HIGH)
+        - Asset value >= EUR 5M (mandatory HIGH)
+        - Customer net worth >= EUR 50M (mandatory HIGH)
+        - UBO fallback applied (mandatory HIGH)
+        - Complex structure / control-only UBO (MEDIUM)
+        
+        Outputs: riskTier (HIGH/MEDIUM/LOW), cddLevel (ENHANCED/STANDARD/SIMPLIFIED), riskRationale (string)
+      </bpmn:documentation>
+      <bpmn:incoming>flow_bo_to_risk</bpmn:incoming>
+      <bpmn:outgoing>flow_risk_to_gateway</bpmn:outgoing>
+    </bpmn:businessRuleTask>
+
+    <!-- ==================== PHASE 4: RISK-BASED ROUTING ==================== -->
+
+    <bpmn:exclusiveGateway id="gw_risk_tier" name="Risk Tier?">
+      <bpmn:incoming>flow_risk_to_gateway</bpmn:incoming>
+      <bpmn:outgoing>flow_high_risk</bpmn:outgoing>
+      <bpmn:outgoing>flow_medium_risk</bpmn:outgoing>
+      <bpmn:outgoing>flow_low_risk</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <!-- ==================== PATH A: HIGH RISK — EDD ==================== -->
+
+    <!-- Business Rule Task 3: EDD Requirements (only for HIGH risk) -->
+    <bpmn:businessRuleTask id="task_edd_determination" name="Determine EDD&#10;Requirements" camunda:resultVariable="eddRequirementsList" camunda:decisionRef="edd_requirements" camunda:mapDecisionResult="collectEntries">
+      <bpmn:documentation>
+        DMN Decision Table: edd-requirements.dmn
+        Hit Policy: COLLECT
+        
+        For HIGH-risk clients, determines the full set of applicable EDD measures.
+        Multiple rules fire simultaneously — all applicable measures are collected.
+        
+        Outputs: List of { eddMeasure, eddCategory, reviewFrequency }
+      </bpmn:documentation>
+      <bpmn:incoming>flow_high_risk</bpmn:incoming>
+      <bpmn:outgoing>flow_edd_to_subprocess</bpmn:outgoing>
+    </bpmn:businessRuleTask>
+
+    <!-- EDD Sub-process: Execute all required EDD measures -->
+    <bpmn:subProcess id="subprocess_edd" name="Execute Enhanced Due Diligence">
+      <bpmn:documentation>
+        This sub-process orchestrates execution of all EDD measures 
+        identified by the EDD Requirements decision table.
+        
+        Each measure is executed, documented, and evidenced.
+        The sub-process produces a consolidated EDD package for 
+        compliance review.
+      </bpmn:documentation>
+      <bpmn:incoming>flow_edd_to_subprocess</bpmn:incoming>
+      <bpmn:outgoing>flow_subprocess_to_compliance</bpmn:outgoing>
+
+      <bpmn:startEvent id="edd_sub_start" name="Begin EDD">
+        <bpmn:outgoing>flow_sub_start_to_sof</bpmn:outgoing>
+      </bpmn:startEvent>
+
+      <bpmn:serviceTask id="task_source_of_funds" name="Verify Source&#10;of Funds" camunda:delegateExpression="${sourceOfFundsDelegate}">
+        <bpmn:incoming>flow_sub_start_to_sof</bpmn:incoming>
+        <bpmn:outgoing>flow_sof_to_sow</bpmn:outgoing>
+      </bpmn:serviceTask>
+
+      <bpmn:serviceTask id="task_source_of_wealth" name="Verify Source&#10;of Wealth" camunda:delegateExpression="${sourceOfWealthDelegate}">
+        <bpmn:incoming>flow_sof_to_sow</bpmn:incoming>
+        <bpmn:outgoing>flow_sow_to_pep</bpmn:outgoing>
+      </bpmn:serviceTask>
+
+      <bpmn:serviceTask id="task_pep_deep_screen" name="PEP Deep&#10;Screening" camunda:delegateExpression="${pepDeepScreenDelegate}">
+        <bpmn:documentation>
+          Screen customer, beneficial owners, family members, and 
+          known close associates against PEP databases.
+          Verify nature of public function if PEP flag is active.
+        </bpmn:documentation>
+        <bpmn:incoming>flow_sow_to_pep</bpmn:incoming>
+        <bpmn:outgoing>flow_pep_to_structure</bpmn:outgoing>
+      </bpmn:serviceTask>
+
+      <bpmn:serviceTask id="task_structure_analysis" name="Ownership Chain&#10;Analysis" camunda:delegateExpression="${structureAnalysisDelegate}">
+        <bpmn:documentation>
+          Map and document full ownership chain. Verify each layer 
+          against BO registers where available. Flag any opaque layers.
+        </bpmn:documentation>
+        <bpmn:incoming>flow_pep_to_structure</bpmn:incoming>
+        <bpmn:outgoing>flow_structure_to_package</bpmn:outgoing>
+      </bpmn:serviceTask>
+
+      <bpmn:serviceTask id="task_compile_edd_package" name="Compile EDD&#10;Evidence Package" camunda:delegateExpression="${compileEddPackageDelegate}">
+        <bpmn:incoming>flow_structure_to_package</bpmn:incoming>
+        <bpmn:outgoing>flow_package_to_sub_end</bpmn:outgoing>
+      </bpmn:serviceTask>
+
+      <bpmn:endEvent id="edd_sub_end" name="EDD Complete">
+        <bpmn:incoming>flow_package_to_sub_end</bpmn:incoming>
+      </bpmn:endEvent>
+
+      <!-- Sub-process internal flows -->
+      <bpmn:sequenceFlow id="flow_sub_start_to_sof" sourceRef="edd_sub_start" targetRef="task_source_of_funds" />
+      <bpmn:sequenceFlow id="flow_sof_to_sow" sourceRef="task_source_of_funds" targetRef="task_source_of_wealth" />
+      <bpmn:sequenceFlow id="flow_sow_to_pep" sourceRef="task_source_of_wealth" targetRef="task_pep_deep_screen" />
+      <bpmn:sequenceFlow id="flow_pep_to_structure" sourceRef="task_pep_deep_screen" targetRef="task_structure_analysis" />
+      <bpmn:sequenceFlow id="flow_structure_to_package" sourceRef="task_structure_analysis" targetRef="task_compile_edd_package" />
+      <bpmn:sequenceFlow id="flow_package_to_sub_end" sourceRef="task_compile_edd_package" targetRef="edd_sub_end" />
+    </bpmn:subProcess>
+
+    <!-- Senior management approval (AMLR mandate for all HIGH risk) -->
+    <bpmn:userTask id="task_senior_mgmt_approval" name="Senior Management&#10;Approval" camunda:assignee="${seniorComplianceManager}">
+      <bpmn:documentation>
+        AMLR requirement: Senior management must approve the establishment 
+        or continuation of any HIGH-risk business relationship.
+        
+        Reviewer receives the full EDD evidence package and must:
+        - Review all EDD measures and findings
+        - Approve continuation, request remediation, or recommend exit
+        - Decision is recorded with rationale for audit purposes
+      </bpmn:documentation>
+      <bpmn:incoming>flow_subprocess_to_compliance</bpmn:incoming>
+      <bpmn:outgoing>flow_compliance_to_decision</bpmn:outgoing>
+    </bpmn:userTask>
+
+    <bpmn:exclusiveGateway id="gw_compliance_decision" name="Compliance&#10;Decision?">
+      <bpmn:incoming>flow_compliance_to_decision</bpmn:incoming>
+      <bpmn:outgoing>flow_approved_high</bpmn:outgoing>
+      <bpmn:outgoing>flow_remediation</bpmn:outgoing>
+      <bpmn:outgoing>flow_exit</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <!-- Remediation loop -->
+    <bpmn:userTask id="task_remediation" name="Client Remediation&#10;Actions" camunda:assignee="${kycAnalyst}">
+      <bpmn:documentation>
+        Where senior management requests additional information or 
+        client action before approval. May include requesting updated 
+        ownership declarations, additional documentation, or 
+        restructuring of the relationship.
+      </bpmn:documentation>
+      <bpmn:incoming>flow_remediation</bpmn:incoming>
+      <bpmn:outgoing>flow_remediation_to_compliance</bpmn:outgoing>
+    </bpmn:userTask>
+
+    <!-- Client exit process -->
+    <bpmn:serviceTask id="task_client_exit" name="Initiate Client&#10;Relationship Exit" camunda:delegateExpression="${clientExitDelegate}">
+      <bpmn:documentation>
+        Where the compliance decision is to exit the relationship.
+        Triggers the orderly wind-down process including transaction 
+        monitoring during exit period and SAR filing if applicable.
+      </bpmn:documentation>
+      <bpmn:incoming>flow_exit</bpmn:incoming>
+      <bpmn:outgoing>flow_exit_to_end</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:endEvent id="end_client_exit" name="Relationship&#10;Exited">
+      <bpmn:incoming>flow_exit_to_end</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <!-- ==================== PATH B: MEDIUM RISK — ANALYST REVIEW ==================== -->
+
+    <bpmn:userTask id="task_analyst_review" name="KYC Analyst&#10;Manual Review" camunda:assignee="${kycAnalyst}">
+      <bpmn:documentation>
+        MEDIUM risk clients require manual analyst review to:
+        - Validate BO assessment outputs
+        - Review any structural complexity or control-only UBO flags
+        - Determine if risk should be escalated to HIGH or confirmed at MEDIUM
+        - Apply standard CDD with enhanced monitoring where appropriate
+      </bpmn:documentation>
+      <bpmn:incoming>flow_medium_risk</bpmn:incoming>
+      <bpmn:outgoing>flow_analyst_to_decision</bpmn:outgoing>
+    </bpmn:userTask>
+
+    <bpmn:exclusiveGateway id="gw_analyst_decision" name="Analyst&#10;Decision?">
+      <bpmn:incoming>flow_analyst_to_decision</bpmn:incoming>
+      <bpmn:outgoing>flow_analyst_approve</bpmn:outgoing>
+      <bpmn:outgoing>flow_analyst_escalate</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <!-- Escalation path: analyst determines risk should be HIGH -->
+    <bpmn:sequenceFlow id="flow_analyst_escalate" name="Escalate to HIGH" sourceRef="gw_analyst_decision" targetRef="task_edd_determination">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${analystDecision == 'ESCALATE'}</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+
+    <!-- ==================== PATH C: LOW RISK — AUTO-APPROVE ==================== -->
+
+    <bpmn:serviceTask id="task_auto_approve" name="Auto-Approve&#10;(Simplified CDD)" camunda:delegateExpression="${autoApproveDelegate}">
+      <bpmn:documentation>
+        LOW risk clients with clear UBO identification via ownership test, 
+        no adverse indicators, and below all value thresholds qualify for 
+        simplified due diligence.
+        
+        Auto-approval generates an audit record documenting:
+        - DMN decision outputs (BO assessment + risk classification)
+        - Register cross-check results
+        - Timestamp and system reference
+        - Next scheduled review date
+      </bpmn:documentation>
+      <bpmn:incoming>flow_low_risk</bpmn:incoming>
+      <bpmn:outgoing>flow_auto_to_update</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <!-- ==================== PHASE 5: FINALISATION ==================== -->
+
+    <!-- All approved paths converge here -->
+    <bpmn:exclusiveGateway id="gw_merge" name="Merge Approved&#10;Paths">
+      <bpmn:incoming>flow_approved_high</bpmn:incoming>
+      <bpmn:incoming>flow_analyst_approve</bpmn:incoming>
+      <bpmn:incoming>flow_auto_to_update</bpmn:incoming>
+      <bpmn:outgoing>flow_merge_to_update</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <bpmn:serviceTask id="task_update_kyc_record" name="Update KYC&#10;Record" camunda:delegateExpression="${updateKycRecordDelegate}">
+      <bpmn:documentation>
+        Update the client KYC record in the core system with:
+        - New BO assessment results (method, threshold, UBO identity)
+        - Updated risk tier and CDD level
+        - EDD measures applied (if HIGH risk)
+        - Compliance decision and approver
+        - Next scheduled review date (per review frequency from DMN)
+        - Full audit trail of the re-screening process
+      </bpmn:documentation>
+      <bpmn:incoming>flow_merge_to_update</bpmn:incoming>
+      <bpmn:outgoing>flow_update_to_monitoring</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="task_set_monitoring" name="Configure Ongoing&#10;Monitoring Schedule" camunda:delegateExpression="${setMonitoringDelegate}">
+      <bpmn:documentation>
+        Set the ongoing monitoring and review schedule based on the 
+        risk tier classification:
+        - HIGH: Quarterly enhanced monitoring, annual full review
+        - MEDIUM: Semi-annual monitoring, annual review
+        - LOW: Annual review (event-driven triggers apply to all tiers)
+        
+        AMLR drives adoption of perpetual and event-driven KYC processes.
+      </bpmn:documentation>
+      <bpmn:incoming>flow_update_to_monitoring</bpmn:incoming>
+      <bpmn:outgoing>flow_monitoring_to_end</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:endEvent id="end_approved" name="Re-screening&#10;Complete">
+      <bpmn:incoming>flow_monitoring_to_end</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <!-- ==================== SEQUENCE FLOWS ==================== -->
+
+    <!-- Phase 1-2: Trigger and Data Extraction -->
+    <bpmn:sequenceFlow id="flow_start_to_extract" sourceRef="start_reg_change" targetRef="task_extract_client_data" />
+    <bpmn:sequenceFlow id="flow_extract_to_register" sourceRef="task_extract_client_data" targetRef="task_register_crosscheck" />
+    <bpmn:sequenceFlow id="flow_register_to_discrepancy" sourceRef="task_register_crosscheck" targetRef="gw_discrepancy_check" />
+
+    <!-- Discrepancy handling -->
+    <bpmn:sequenceFlow id="flow_discrepancy_yes" name="Yes" sourceRef="gw_discrepancy_check" targetRef="task_report_discrepancy">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${registerDiscrepancyFound == true}</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="flow_discrepancy_no" name="No" sourceRef="gw_discrepancy_check" targetRef="task_bo_assessment">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${registerDiscrepancyFound == false}</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="flow_discrepancy_to_bo" sourceRef="task_report_discrepancy" targetRef="task_bo_assessment" />
+
+    <!-- Phase 3: DMN chain -->
+    <bpmn:sequenceFlow id="flow_bo_to_risk" sourceRef="task_bo_assessment" targetRef="task_risk_classification" />
+    <bpmn:sequenceFlow id="flow_risk_to_gateway" sourceRef="task_risk_classification" targetRef="gw_risk_tier" />
+
+    <!-- Phase 4: Risk-based routing -->
+    <bpmn:sequenceFlow id="flow_high_risk" name="HIGH" sourceRef="gw_risk_tier" targetRef="task_edd_determination">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${riskTier == 'HIGH'}</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="flow_medium_risk" name="MEDIUM" sourceRef="gw_risk_tier" targetRef="task_analyst_review">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${riskTier == 'MEDIUM'}</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="flow_low_risk" name="LOW" sourceRef="gw_risk_tier" targetRef="task_auto_approve">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${riskTier == 'LOW'}</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+
+    <!-- HIGH risk path -->
+    <bpmn:sequenceFlow id="flow_edd_to_subprocess" sourceRef="task_edd_determination" targetRef="subprocess_edd" />
+    <bpmn:sequenceFlow id="flow_subprocess_to_compliance" sourceRef="subprocess_edd" targetRef="task_senior_mgmt_approval" />
+    <bpmn:sequenceFlow id="flow_compliance_to_decision" sourceRef="task_senior_mgmt_approval" targetRef="gw_compliance_decision" />
+    <bpmn:sequenceFlow id="flow_approved_high" name="Approved" sourceRef="gw_compliance_decision" targetRef="gw_merge">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${complianceDecision == 'APPROVED'}</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="flow_remediation" name="Remediation&#10;Required" sourceRef="gw_compliance_decision" targetRef="task_remediation">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${complianceDecision == 'REMEDIATION'}</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="flow_exit" name="Exit" sourceRef="gw_compliance_decision" targetRef="task_client_exit">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${complianceDecision == 'EXIT'}</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="flow_exit_to_end" sourceRef="task_client_exit" targetRef="end_client_exit" />
+    <bpmn:sequenceFlow id="flow_remediation_to_compliance" sourceRef="task_remediation" targetRef="task_senior_mgmt_approval" />
+
+    <!-- MEDIUM risk path -->
+    <bpmn:sequenceFlow id="flow_analyst_to_decision" sourceRef="task_analyst_review" targetRef="gw_analyst_decision" />
+    <bpmn:sequenceFlow id="flow_analyst_approve" name="Approved" sourceRef="gw_analyst_decision" targetRef="gw_merge">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${analystDecision == 'APPROVED'}</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+
+    <!-- LOW risk path -->
+    <bpmn:sequenceFlow id="flow_auto_to_update" sourceRef="task_auto_approve" targetRef="gw_merge" />
+
+    <!-- Phase 5: Finalisation -->
+    <bpmn:sequenceFlow id="flow_merge_to_update" sourceRef="gw_merge" targetRef="task_update_kyc_record" />
+    <bpmn:sequenceFlow id="flow_update_to_monitoring" sourceRef="task_update_kyc_record" targetRef="task_set_monitoring" />
+    <bpmn:sequenceFlow id="flow_monitoring_to_end" sourceRef="task_set_monitoring" targetRef="end_approved" />
+
+  </bpmn:process>
+
+  <!-- ==================== SIGNAL DEFINITION ==================== -->
+
+  <bpmn:signal id="sig_amlr_change" name="AMLR_AMLD6_Regulatory_Change" />
+
+  <!-- ==================== DIAGRAM LAYOUT ==================== -->
+
+  <bpmndi:BPMNDiagram id="BPMNDiagram_1">
+    <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="kyc_bo_rescreening">
+
+      <!-- === ROW 1: Trigger and Data Extraction (y=270) === -->
+
+      <bpmndi:BPMNShape id="shape_start" bpmnElement="start_reg_change">
+        <dc:Bounds x="160" y="252" width="36" height="36" />
+        <bpmndi:BPMNLabel><dc:Bounds x="133" y="295" width="90" height="40" /></bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="shape_extract" bpmnElement="task_extract_client_data">
+        <dc:Bounds x="260" y="230" width="100" height="80" />
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="shape_register" bpmnElement="task_register_crosscheck">
+        <dc:Bounds x="420" y="230" width="100" height="80" />
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="shape_gw_discrepancy" bpmnElement="gw_discrepancy_check" isMarkerVisible="true">
+        <dc:Bounds x="575" y="245" width="50" height="50" />
+        <bpmndi:BPMNLabel><dc:Bounds x="565" y="302" width="70" height="27" /></bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="shape_report_discrepancy" bpmnElement="task_report_discrepancy">
+        <dc:Bounds x="550" y="100" width="100" height="80" />
+      </bpmndi:BPMNShape>
+
+      <!-- === ROW 2: DMN Decisions (y=270) === -->
+
+      <bpmndi:BPMNShape id="shape_bo_assessment" bpmnElement="task_bo_assessment">
+        <dc:Bounds x="700" y="230" width="100" height="80" />
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="shape_risk_classification" bpmnElement="task_risk_classification">
+        <dc:Bounds x="860" y="230" width="100" height="80" />
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="shape_gw_risk" bpmnElement="gw_risk_tier" isMarkerVisible="true">
+        <dc:Bounds x="1015" y="245" width="50" height="50" />
+        <bpmndi:BPMNLabel><dc:Bounds x="1010" y="302" width="60" height="14" /></bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <!-- === ROW 0: HIGH Risk Path (y=80) === -->
+
+      <bpmndi:BPMNShape id="shape_edd_determination" bpmnElement="task_edd_determination">
+        <dc:Bounds x="1120" y="60" width="100" height="80" />
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="shape_subprocess_edd" bpmnElement="subprocess_edd" isExpanded="true">
+        <dc:Bounds x="1270" y="15" width="680" height="170" />
+      </bpmndi:BPMNShape>
+
+      <!-- Sub-process internal shapes -->
+      <bpmndi:BPMNShape id="shape_edd_sub_start" bpmnElement="edd_sub_start">
+        <dc:Bounds x="1290" y="82" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="shape_sof" bpmnElement="task_source_of_funds">
+        <dc:Bounds x="1350" y="60" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="shape_sow" bpmnElement="task_source_of_wealth">
+        <dc:Bounds x="1470" y="60" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="shape_pep" bpmnElement="task_pep_deep_screen">
+        <dc:Bounds x="1590" y="60" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="shape_structure" bpmnElement="task_structure_analysis">
+        <dc:Bounds x="1710" y="60" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="shape_compile" bpmnElement="task_compile_edd_package">
+        <dc:Bounds x="1830" y="60" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="shape_edd_sub_end" bpmnElement="edd_sub_end">
+        <dc:Bounds x="1900" y="82" width="36" height="36" />
+      </bpmndi:BPMNShape>
+
+      <!-- Post-EDD compliance path -->
+      <bpmndi:BPMNShape id="shape_senior_approval" bpmnElement="task_senior_mgmt_approval">
+        <dc:Bounds x="2010" y="60" width="100" height="80" />
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="shape_gw_compliance" bpmnElement="gw_compliance_decision" isMarkerVisible="true">
+        <dc:Bounds x="2165" y="75" width="50" height="50" />
+        <bpmndi:BPMNLabel><dc:Bounds x="2155" y="45" width="70" height="27" /></bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="shape_remediation" bpmnElement="task_remediation">
+        <dc:Bounds x="2140" y="-60" width="100" height="80" />
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="shape_client_exit" bpmnElement="task_client_exit">
+        <dc:Bounds x="2300" y="60" width="100" height="80" />
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="shape_end_exit" bpmnElement="end_client_exit">
+        <dc:Bounds x="2452" y="82" width="36" height="36" />
+        <bpmndi:BPMNLabel><dc:Bounds x="2435" y="125" width="70" height="27" /></bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <!-- === ROW 2: MEDIUM Risk Path (y=270) === -->
+
+      <bpmndi:BPMNShape id="shape_analyst_review" bpmnElement="task_analyst_review">
+        <dc:Bounds x="1120" y="230" width="100" height="80" />
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="shape_gw_analyst" bpmnElement="gw_analyst_decision" isMarkerVisible="true">
+        <dc:Bounds x="1285" y="245" width="50" height="50" />
+        <bpmndi:BPMNLabel><dc:Bounds x="1278" y="302" width="65" height="27" /></bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <!-- === ROW 3: LOW Risk Path (y=440) === -->
+
+      <bpmndi:BPMNShape id="shape_auto_approve" bpmnElement="task_auto_approve">
+        <dc:Bounds x="1120" y="400" width="100" height="80" />
+      </bpmndi:BPMNShape>
+
+      <!-- === FINALISATION (right side) === -->
+
+      <bpmndi:BPMNShape id="shape_gw_merge" bpmnElement="gw_merge" isMarkerVisible="true">
+        <dc:Bounds x="2165" y="245" width="50" height="50" />
+        <bpmndi:BPMNLabel><dc:Bounds x="2145" y="302" width="90" height="27" /></bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="shape_update_kyc" bpmnElement="task_update_kyc_record">
+        <dc:Bounds x="2300" y="230" width="100" height="80" />
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="shape_set_monitoring" bpmnElement="task_set_monitoring">
+        <dc:Bounds x="2460" y="230" width="100" height="80" />
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="shape_end_approved" bpmnElement="end_approved">
+        <dc:Bounds x="2622" y="252" width="36" height="36" />
+        <bpmndi:BPMNLabel><dc:Bounds x="2605" y="295" width="70" height="27" /></bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+
+      <!-- === SEQUENCE FLOW EDGES === -->
+
+      <!-- Phase 1-2 -->
+      <bpmndi:BPMNEdge id="edge_start_to_extract" bpmnElement="flow_start_to_extract">
+        <di:waypoint x="196" y="270" />
+        <di:waypoint x="260" y="270" />
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="edge_extract_to_register" bpmnElement="flow_extract_to_register">
+        <di:waypoint x="360" y="270" />
+        <di:waypoint x="420" y="270" />
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="edge_register_to_discrepancy" bpmnElement="flow_register_to_discrepancy">
+        <di:waypoint x="520" y="270" />
+        <di:waypoint x="575" y="270" />
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="edge_discrepancy_yes" bpmnElement="flow_discrepancy_yes">
+        <di:waypoint x="600" y="245" />
+        <di:waypoint x="600" y="180" />
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="edge_discrepancy_no" bpmnElement="flow_discrepancy_no">
+        <di:waypoint x="625" y="270" />
+        <di:waypoint x="700" y="270" />
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="edge_discrepancy_to_bo" bpmnElement="flow_discrepancy_to_bo">
+        <di:waypoint x="650" y="140" />
+        <di:waypoint x="750" y="140" />
+        <di:waypoint x="750" y="230" />
+      </bpmndi:BPMNEdge>
+
+      <!-- Phase 3: DMN chain -->
+      <bpmndi:BPMNEdge id="edge_bo_to_risk" bpmnElement="flow_bo_to_risk">
+        <di:waypoint x="800" y="270" />
+        <di:waypoint x="860" y="270" />
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="edge_risk_to_gateway" bpmnElement="flow_risk_to_gateway">
+        <di:waypoint x="960" y="270" />
+        <di:waypoint x="1015" y="270" />
+      </bpmndi:BPMNEdge>
+
+      <!-- Phase 4: Routing -->
+      <bpmndi:BPMNEdge id="edge_high_risk" bpmnElement="flow_high_risk">
+        <di:waypoint x="1040" y="245" />
+        <di:waypoint x="1040" y="100" />
+        <di:waypoint x="1120" y="100" />
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="edge_medium_risk" bpmnElement="flow_medium_risk">
+        <di:waypoint x="1065" y="270" />
+        <di:waypoint x="1120" y="270" />
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="edge_low_risk" bpmnElement="flow_low_risk">
+        <di:waypoint x="1040" y="295" />
+        <di:waypoint x="1040" y="440" />
+        <di:waypoint x="1120" y="440" />
+      </bpmndi:BPMNEdge>
+
+      <!-- HIGH risk path -->
+      <bpmndi:BPMNEdge id="edge_edd_to_subprocess" bpmnElement="flow_edd_to_subprocess">
+        <di:waypoint x="1220" y="100" />
+        <di:waypoint x="1270" y="100" />
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="edge_subprocess_to_compliance" bpmnElement="flow_subprocess_to_compliance">
+        <di:waypoint x="1950" y="100" />
+        <di:waypoint x="2010" y="100" />
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="edge_compliance_to_decision" bpmnElement="flow_compliance_to_decision">
+        <di:waypoint x="2110" y="100" />
+        <di:waypoint x="2165" y="100" />
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="edge_approved_high" bpmnElement="flow_approved_high">
+        <di:waypoint x="2190" y="125" />
+        <di:waypoint x="2190" y="245" />
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="edge_remediation" bpmnElement="flow_remediation">
+        <di:waypoint x="2190" y="75" />
+        <di:waypoint x="2190" y="20" />
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="edge_remediation_to_compliance" bpmnElement="flow_remediation_to_compliance">
+        <di:waypoint x="2140" y="-20" />
+        <di:waypoint x="2060" y="-20" />
+        <di:waypoint x="2060" y="60" />
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="edge_exit" bpmnElement="flow_exit">
+        <di:waypoint x="2215" y="100" />
+        <di:waypoint x="2300" y="100" />
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="edge_exit_to_end" bpmnElement="flow_exit_to_end">
+        <di:waypoint x="2400" y="100" />
+        <di:waypoint x="2452" y="100" />
+      </bpmndi:BPMNEdge>
+
+      <!-- MEDIUM risk path -->
+      <bpmndi:BPMNEdge id="edge_analyst_to_decision" bpmnElement="flow_analyst_to_decision">
+        <di:waypoint x="1220" y="270" />
+        <di:waypoint x="1285" y="270" />
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="edge_analyst_approve" bpmnElement="flow_analyst_approve">
+        <di:waypoint x="1335" y="270" />
+        <di:waypoint x="2165" y="270" />
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="edge_analyst_escalate" bpmnElement="flow_analyst_escalate">
+        <di:waypoint x="1310" y="245" />
+        <di:waypoint x="1310" y="155" />
+        <di:waypoint x="1170" y="155" />
+        <di:waypoint x="1170" y="140" />
+      </bpmndi:BPMNEdge>
+
+      <!-- LOW risk path -->
+      <bpmndi:BPMNEdge id="edge_auto_to_update" bpmnElement="flow_auto_to_update">
+        <di:waypoint x="1220" y="440" />
+        <di:waypoint x="2190" y="440" />
+        <di:waypoint x="2190" y="295" />
+      </bpmndi:BPMNEdge>
+
+      <!-- Finalisation -->
+      <bpmndi:BPMNEdge id="edge_merge_to_update" bpmnElement="flow_merge_to_update">
+        <di:waypoint x="2215" y="270" />
+        <di:waypoint x="2300" y="270" />
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="edge_update_to_monitoring" bpmnElement="flow_update_to_monitoring">
+        <di:waypoint x="2400" y="270" />
+        <di:waypoint x="2460" y="270" />
+      </bpmndi:BPMNEdge>
+
+      <bpmndi:BPMNEdge id="edge_monitoring_to_end" bpmnElement="flow_monitoring_to_end">
+        <di:waypoint x="2560" y="270" />
+        <di:waypoint x="2622" y="270" />
+      </bpmndi:BPMNEdge>
+
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+
+</bpmn:definitions>

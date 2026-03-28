@@ -1,0 +1,257 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="https://www.omg.org/spec/DMN/20191111/MODEL/"
+             xmlns:dmndi="https://www.omg.org/spec/DMN/20191111/DMNDI/"
+             xmlns:dc="http://www.omg.org/spec/DMN/20180521/DC/"
+             xmlns:di="http://www.omg.org/spec/DMN/20180521/DI/"
+             xmlns:camunda="http://camunda.org/schema/1.0/dmn"
+             id="risk_tier_definitions"
+             name="Risk Tier Classification"
+             namespace="http://camunda.org/schema/1.0/dmn"
+             exporter="Camunda Modeler"
+             exporterVersion="5.20.0">
+
+  <!-- ============================================================
+       RISK TIER CLASSIFICATION
+       
+       This decision table determines the customer risk tier and 
+       applicable CDD level based on the AMLR risk factor framework.
+       
+       Inherent risk factors (per AMLR Annex III):
+         - Customer: PEP status, UBO identification method
+         - Geography: high-risk third country jurisdiction
+         - Structure: complex/multi-layered ownership
+         - Value: asset value and customer net worth thresholds
+       
+       Hit Policy: PRIORITY (highest risk tier wins)
+       ============================================================ -->
+
+  <decision id="risk_tier_classification" name="Risk Tier Classification">
+    <informationRequirement id="ir_from_bo">
+      <requiredDecision href="#bo_assessment" />
+    </informationRequirement>
+
+    <decisionTable id="dt_risk_tier" hitPolicy="PRIORITY">
+
+      <!-- ==================== INPUTS ==================== -->
+
+      <!-- Output from BO Assessment decision -->
+      <input id="input_ubo_identified" label="UBO Identified" camunda:inputVariable="uboIdentified">
+        <inputExpression id="ie_ubo_identified" typeRef="boolean">
+          <text>uboIdentified</text>
+        </inputExpression>
+      </input>
+
+      <input id="input_id_method" label="Identification Method" camunda:inputVariable="identificationMethod">
+        <inputExpression id="ie_id_method" typeRef="string">
+          <text>identificationMethod</text>
+        </inputExpression>
+      </input>
+
+      <!-- PEP status of customer or any identified beneficial owner -->
+      <input id="input_pep_flag" label="PEP Flag" camunda:inputVariable="pepFlag">
+        <inputExpression id="ie_pep_flag" typeRef="boolean">
+          <text>pepFlag</text>
+        </inputExpression>
+      </input>
+
+      <!-- Whether jurisdiction is on EU high-risk third country list -->
+      <input id="input_high_risk_jurisdiction" label="High-Risk Jurisdiction" camunda:inputVariable="highRiskJurisdiction">
+        <inputExpression id="ie_high_risk_jurisdiction" typeRef="boolean">
+          <text>highRiskJurisdiction</text>
+        </inputExpression>
+      </input>
+
+      <!-- Whether the entity has complex/multi-layered/cross-jurisdictional structure -->
+      <input id="input_complex_structure" label="Complex Structure" camunda:inputVariable="complexStructure">
+        <inputExpression id="ie_complex_structure" typeRef="boolean">
+          <text>complexStructure</text>
+        </inputExpression>
+      </input>
+
+      <!-- Total asset value of the business relationship in EUR -->
+      <input id="input_asset_value" label="Asset Value (EUR)" camunda:inputVariable="assetValueEUR">
+        <inputExpression id="ie_asset_value" typeRef="double">
+          <text>assetValueEUR</text>
+        </inputExpression>
+      </input>
+
+      <!-- Customer net worth in EUR -->
+      <input id="input_net_worth" label="Customer Net Worth (EUR)" camunda:inputVariable="customerNetWorthEUR">
+        <inputExpression id="ie_net_worth" typeRef="double">
+          <text>customerNetWorthEUR</text>
+        </inputExpression>
+      </input>
+
+      <!-- ==================== OUTPUTS ==================== -->
+
+      <output id="output_risk_tier" label="Risk Tier" name="riskTier" typeRef="string">
+        <outputValues id="ov_risk_tier">
+          <text>"HIGH","MEDIUM","LOW"</text>
+        </outputValues>
+      </output>
+
+      <output id="output_cdd_level" label="CDD Level" name="cddLevel" typeRef="string">
+        <outputValues id="ov_cdd_level">
+          <text>"ENHANCED","STANDARD","SIMPLIFIED"</text>
+        </outputValues>
+      </output>
+
+      <output id="output_risk_rationale" label="Risk Rationale" name="riskRationale" typeRef="string" />
+
+      <!-- ==================== RULES ==================== 
+           Priority order: HIGH > MEDIUM > LOW 
+           Multiple HIGH triggers can match; PRIORITY returns highest -->
+
+      <!-- === HIGH RISK RULES === -->
+
+      <!-- H1: PEP involvement always triggers HIGH -->
+      <rule id="rule_h1">
+        <description>AMLR: PEP status mandates Enhanced Due Diligence (extends 12 months post-function)</description>
+        <inputEntry id="h1_ie1"><text>-</text></inputEntry>
+        <inputEntry id="h1_ie2"><text>-</text></inputEntry>
+        <inputEntry id="h1_ie3"><text>true</text></inputEntry>
+        <inputEntry id="h1_ie4"><text>-</text></inputEntry>
+        <inputEntry id="h1_ie5"><text>-</text></inputEntry>
+        <inputEntry id="h1_ie6"><text>-</text></inputEntry>
+        <inputEntry id="h1_ie7"><text>-</text></inputEntry>
+        <outputEntry id="h1_oe1"><text>"HIGH"</text></outputEntry>
+        <outputEntry id="h1_oe2"><text>"ENHANCED"</text></outputEntry>
+        <outputEntry id="h1_oe3"><text>"PEP involvement — mandatory EDD per AMLR"</text></outputEntry>
+      </rule>
+
+      <!-- H2: High-risk third country jurisdiction -->
+      <rule id="rule_h2">
+        <description>AMLR Annex III: High-risk third country triggers EDD</description>
+        <inputEntry id="h2_ie1"><text>-</text></inputEntry>
+        <inputEntry id="h2_ie2"><text>-</text></inputEntry>
+        <inputEntry id="h2_ie3"><text>-</text></inputEntry>
+        <inputEntry id="h2_ie4"><text>true</text></inputEntry>
+        <inputEntry id="h2_ie5"><text>-</text></inputEntry>
+        <inputEntry id="h2_ie6"><text>-</text></inputEntry>
+        <inputEntry id="h2_ie7"><text>-</text></inputEntry>
+        <outputEntry id="h2_oe1"><text>"HIGH"</text></outputEntry>
+        <outputEntry id="h2_oe2"><text>"ENHANCED"</text></outputEntry>
+        <outputEntry id="h2_oe3"><text>"High-risk third country jurisdiction"</text></outputEntry>
+      </rule>
+
+      <!-- H3: Asset value >= EUR 5,000,000 -->
+      <rule id="rule_h3">
+        <description>AMLR: Business relationships involving assets >= EUR 5M require EDD</description>
+        <inputEntry id="h3_ie1"><text>-</text></inputEntry>
+        <inputEntry id="h3_ie2"><text>-</text></inputEntry>
+        <inputEntry id="h3_ie3"><text>-</text></inputEntry>
+        <inputEntry id="h3_ie4"><text>-</text></inputEntry>
+        <inputEntry id="h3_ie5"><text>-</text></inputEntry>
+        <inputEntry id="h3_ie6"><text>>= 5000000</text></inputEntry>
+        <inputEntry id="h3_ie7"><text>-</text></inputEntry>
+        <outputEntry id="h3_oe1"><text>"HIGH"</text></outputEntry>
+        <outputEntry id="h3_oe2"><text>"ENHANCED"</text></outputEntry>
+        <outputEntry id="h3_oe3"><text>"Asset value >= EUR 5M threshold"</text></outputEntry>
+      </rule>
+
+      <!-- H4: Customer net worth >= EUR 50,000,000 -->
+      <rule id="rule_h4">
+        <description>AMLR: Customer net worth >= EUR 50M requires EDD (AMLA guidelines pending)</description>
+        <inputEntry id="h4_ie1"><text>-</text></inputEntry>
+        <inputEntry id="h4_ie2"><text>-</text></inputEntry>
+        <inputEntry id="h4_ie3"><text>-</text></inputEntry>
+        <inputEntry id="h4_ie4"><text>-</text></inputEntry>
+        <inputEntry id="h4_ie5"><text>-</text></inputEntry>
+        <inputEntry id="h4_ie6"><text>-</text></inputEntry>
+        <inputEntry id="h4_ie7"><text>>= 50000000</text></inputEntry>
+        <outputEntry id="h4_oe1"><text>"HIGH"</text></outputEntry>
+        <outputEntry id="h4_oe2"><text>"ENHANCED"</text></outputEntry>
+        <outputEntry id="h4_oe3"><text>"Customer net worth >= EUR 50M threshold"</text></outputEntry>
+      </rule>
+
+      <!-- H5: Senior management fallback (no UBO identified) → always HIGH -->
+      <rule id="rule_h5">
+        <description>AMLR: Failure to identify UBO after exhausting both tests indicates elevated risk</description>
+        <inputEntry id="h5_ie1"><text>false</text></inputEntry>
+        <inputEntry id="h5_ie2"><text>"senior_management_fallback"</text></inputEntry>
+        <inputEntry id="h5_ie3"><text>-</text></inputEntry>
+        <inputEntry id="h5_ie4"><text>-</text></inputEntry>
+        <inputEntry id="h5_ie5"><text>-</text></inputEntry>
+        <inputEntry id="h5_ie6"><text>-</text></inputEntry>
+        <inputEntry id="h5_ie7"><text>-</text></inputEntry>
+        <outputEntry id="h5_oe1"><text>"HIGH"</text></outputEntry>
+        <outputEntry id="h5_oe2"><text>"ENHANCED"</text></outputEntry>
+        <outputEntry id="h5_oe3"><text>"UBO not identified — senior management fallback applied"</text></outputEntry>
+      </rule>
+
+      <!-- === MEDIUM RISK RULES === -->
+
+      <!-- M1: Complex structure without other HIGH triggers -->
+      <rule id="rule_m1">
+        <description>Complex multi-layered or cross-jurisdictional ownership structure</description>
+        <inputEntry id="m1_ie1"><text>true</text></inputEntry>
+        <inputEntry id="m1_ie2"><text>-</text></inputEntry>
+        <inputEntry id="m1_ie3"><text>false</text></inputEntry>
+        <inputEntry id="m1_ie4"><text>false</text></inputEntry>
+        <inputEntry id="m1_ie5"><text>true</text></inputEntry>
+        <inputEntry id="m1_ie6"><text>&lt; 5000000</text></inputEntry>
+        <inputEntry id="m1_ie7"><text>&lt; 50000000</text></inputEntry>
+        <outputEntry id="m1_oe1"><text>"MEDIUM"</text></outputEntry>
+        <outputEntry id="m1_oe2"><text>"STANDARD"</text></outputEntry>
+        <outputEntry id="m1_oe3"><text>"Complex ownership structure — standard CDD with enhanced monitoring"</text></outputEntry>
+      </rule>
+
+      <!-- M2: UBO identified via control (not ownership) → elevated attention -->
+      <rule id="rule_m2">
+        <description>UBO identified via control-via-other-means only (no direct ownership stake)</description>
+        <inputEntry id="m2_ie1"><text>true</text></inputEntry>
+        <inputEntry id="m2_ie2"><text>"control_other_means"</text></inputEntry>
+        <inputEntry id="m2_ie3"><text>false</text></inputEntry>
+        <inputEntry id="m2_ie4"><text>false</text></inputEntry>
+        <inputEntry id="m2_ie5"><text>false</text></inputEntry>
+        <inputEntry id="m2_ie6"><text>&lt; 5000000</text></inputEntry>
+        <inputEntry id="m2_ie7"><text>&lt; 50000000</text></inputEntry>
+        <outputEntry id="m2_oe1"><text>"MEDIUM"</text></outputEntry>
+        <outputEntry id="m2_oe2"><text>"STANDARD"</text></outputEntry>
+        <outputEntry id="m2_oe3"><text>"UBO via control test only — warrants closer scrutiny"</text></outputEntry>
+      </rule>
+
+      <!-- M3: Investigation still required (incomplete BO assessment) -->
+      <rule id="rule_m3">
+        <description>BO assessment incomplete — cannot yet determine risk tier, treat as MEDIUM pending</description>
+        <inputEntry id="m3_ie1"><text>false</text></inputEntry>
+        <inputEntry id="m3_ie2"><text>"investigation_required"</text></inputEntry>
+        <inputEntry id="m3_ie3"><text>-</text></inputEntry>
+        <inputEntry id="m3_ie4"><text>-</text></inputEntry>
+        <inputEntry id="m3_ie5"><text>-</text></inputEntry>
+        <inputEntry id="m3_ie6"><text>-</text></inputEntry>
+        <inputEntry id="m3_ie7"><text>-</text></inputEntry>
+        <outputEntry id="m3_oe1"><text>"MEDIUM"</text></outputEntry>
+        <outputEntry id="m3_oe2"><text>"STANDARD"</text></outputEntry>
+        <outputEntry id="m3_oe3"><text>"BO assessment incomplete — pending further investigation"</text></outputEntry>
+      </rule>
+
+      <!-- === LOW RISK RULES === -->
+
+      <!-- L1: UBO clearly identified via ownership, no risk flags, low value -->
+      <rule id="rule_l1">
+        <description>Low-risk: UBO identified via ownership, no adverse indicators, below value thresholds</description>
+        <inputEntry id="l1_ie1"><text>true</text></inputEntry>
+        <inputEntry id="l1_ie2"><text>"ownership_standard","ownership_delegated_act"</text></inputEntry>
+        <inputEntry id="l1_ie3"><text>false</text></inputEntry>
+        <inputEntry id="l1_ie4"><text>false</text></inputEntry>
+        <inputEntry id="l1_ie5"><text>false</text></inputEntry>
+        <inputEntry id="l1_ie6"><text>&lt; 5000000</text></inputEntry>
+        <inputEntry id="l1_ie7"><text>&lt; 50000000</text></inputEntry>
+        <outputEntry id="l1_oe1"><text>"LOW"</text></outputEntry>
+        <outputEntry id="l1_oe2"><text>"SIMPLIFIED"</text></outputEntry>
+        <outputEntry id="l1_oe3"><text>"Low-risk profile — simplified due diligence applicable"</text></outputEntry>
+      </rule>
+
+    </decisionTable>
+  </decision>
+
+  <dmndi:DMNDI>
+    <dmndi:DMNDiagram id="DMNDiagram_risk">
+      <dmndi:DMNShape id="DMNShape_risk_tier" dmnElementRef="risk_tier_classification">
+        <dc:Bounds height="80" width="180" x="160" y="100" />
+      </dmndi:DMNShape>
+    </dmndi:DMNDiagram>
+  </dmndi:DMNDI>
+
+</definitions>
