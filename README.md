@@ -53,106 +53,11 @@ For the full regulatory analysis, see [`docs/amld6-regulatory-summary.md`](docs/
 
 The three DMN decision tables are linked in a chain — each table's output feeds the next:
 
-```
-┌─────────────────────┐     ┌─────────────────────┐
-│   Customer Data     │     │  Control Indicators  │
-│ (ownership %, type, │     │ (veto, appointments, │
-│  jurisdiction)      │     │  dominant influence)  │
-└────────┬────────────┘     └──────────┬───────────┘
-         │                             │
-         └──────────┬──────────────────┘
-                    ▼
-   ┌────────────────────────────────┐
-   │  1. Beneficial Ownership       │  Hit Policy: FIRST
-   │     Assessment                 │  7 rules
-   │                                │
-   │  Ownership test → Control test │
-   │  → Senior mgmt fallback       │
-   └───────────────┬────────────────┘
-                   │  uboIdentified
-                   │  identificationMethod
-                   │  applicableThreshold
-                   ▼
-   ┌────────────────────────────────┐     ┌──────────────────┐
-   │  2. Risk Tier                  │◄────│  Risk Factors    │
-   │     Classification             │     │  (PEP, jurisd.,  │
-   │                                │     │   assets, struct) │
-   │  Annex III risk factor eval    │     └──────────────────┘
-   │  HIGH / MEDIUM / LOW           │  Hit Policy: PRIORITY
-   └───────────────┬────────────────┘  8 rules
-                   │  riskTier
-                   │  cddLevel
-                   │  riskRationale
-                   ▼
-   ┌────────────────────────────────┐     ┌──────────────────┐
-   │  3. EDD Requirements           │◄────│  Relationship    │
-   │     Determination              │     │  Data            │
-   │                                │     │  (corresp. bank, │
-   │  Collects all applicable EDD   │     │   product type)  │
-   │  measures for HIGH-risk clients│     └──────────────────┘
-   └────────────────────────────────┘
-      Hit Policy: COLLECT — 12 rules
-      Outputs list of measures with
-      categories + review frequencies
-```
+![DMN Decision Requirement Diagram](diagrams/kyc-bo-rescreening_DMN.svg)
 
 ### BPMN Process Flow
 
-```
- ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐
- │ Reg      │    │ Extract  │    │ Cross-   │    │ Report   │
- │ Change   │───▶│ Client   │───▶│ Check BO │─?─▶│ Discrep- │
- │ Signal   │    │ Data     │    │ Registers│    │ ancy     │
- └──────────┘    └──────────┘    └──────────┘    └──────────┘
-                                                       │
-                 ┌──────────┐    ┌──────────┐          │
-                 │ Assess   │    │ Classify │◄─────────┘
-                 │ BO       │───▶│ Risk     │
-                 │ (DMN 1)  │    │ (DMN 2)  │
-                 └──────────┘    └────┬─────┘
-                                      │
-                    ┌─────────────────┼─────────────────┐
-                    │                 │                  │
-                    ▼                 ▼                  ▼
-               ┌─────────┐    ┌───────────┐     ┌────────────┐
-               │  HIGH   │    │  MEDIUM   │     │    LOW     │
-               └────┬────┘    └─────┬─────┘     └──────┬─────┘
-                    │               │                   │
-                    ▼               ▼                   ▼
-              ┌──────────┐   ┌───────────┐      ┌────────────┐
-              │ EDD Reqs │   │ Analyst   │      │ Auto-      │
-              │ (DMN 3)  │   │ Review    │      │ Approve    │
-              └────┬─────┘   └─────┬─────┘      │ (Simpl.CDD)│
-                   │               │             └──────┬─────┘
-                   ▼          Approve/                  │
-            ┌─────────────┐  Escalate to HIGH           │
-            │ EDD Sub-    │        │                    │
-            │ process     │        │                    │
-            │ ┌─────────┐ │       │                    │
-            │ │SoF→SoW→ │ │       │                    │
-            │ │PEP→Chain│ │       │                    │
-            │ │→Compile │ │       │                    │
-            │ └─────────┘ │       │                    │
-            └──────┬──────┘       │                    │
-                   ▼              │                    │
-            ┌─────────────┐       │                    │
-            │ Senior Mgmt │       │                    │
-            │ Approval    │       │                    │
-            └──────┬──────┘       │                    │
-                   │              │                    │
-           Approve/Remediate/     │                    │
-           Exit    │              │                    │
-                   ▼              ▼                    ▼
-              ┌──────────────────────────────────────────┐
-              │              Merge Approved               │
-              └────────────────────┬─────────────────────┘
-                                   │
-                    ┌──────────┐   │   ┌──────────┐   ┌─────┐
-                    │ Update   │◄──┘   │Configure │   │     │
-                    │ KYC      │──────▶│Monitoring│──▶│ End │
-                    │ Record   │       │Schedule  │   │     │
-                    └──────────┘       └──────────┘   └─────┘
-```
+![BPMN Re-screening Process](diagrams/kyc-bo-rescreening_BPMN.svg)
 
 ---
 
@@ -164,11 +69,10 @@ amld6-kyc-beneficial-ownership/
 ├── README.md                                 ← You are here
 │
 ├── diagrams/
-│   ├── kyc-bo-rescreening-drd.dmn           ← DRD: Links all 3 decisions with input data nodes
-│   ├── bo-assessment.dmn                     ← DMN 1: Beneficial ownership dual-test (FIRST, 7 rules)
-│   ├── risk-tier-classification.dmn          ← DMN 2: Risk tier & CDD level (PRIORITY, 8 rules)
-│   ├── edd-requirements.dmn                  ← DMN 3: EDD measures list (COLLECT, 12 rules)
-│   └── kyc-bo-rescreening.bpmn              ← BPMN: Full re-screening process (17 tasks, 4 gateways)
+│   ├── kyc-bo-rescreening.dmn               ← DMN: DRD + all 3 decision tables (BO, Risk Tier, EDD)
+│   ├── kyc-bo-rescreening.bpmn              ← BPMN: Full re-screening process (17 tasks, 4 gateways)
+│   ├── kyc-bo-rescreening_DMN.svg           ← Visual: Decision Requirement Diagram
+│   └── kyc-bo-rescreening_BPMN.svg          ← Visual: BPMN process flow diagram
 │
 ├── docs/
 │   ├── amld6-regulatory-summary.md           ← Detailed regulatory analysis with source references
@@ -195,9 +99,9 @@ amld6-kyc-beneficial-ownership/
 
 1. Clone or download this repository
 2. Open Camunda Modeler
-3. **Start with the DRD:** Open `diagrams/kyc-bo-rescreening-drd.dmn` to see how the three decisions connect
-4. **Explore individual tables:** Double-click any decision in the DRD, or open each `.dmn` file directly to inspect the full rule sets
-5. **View the process:** Open `diagrams/kyc-bo-rescreening.bpmn` to see the end-to-end BPMN workflow — expand the EDD sub-process to see the internal steps
+3. **Start with the DRD:** Open `diagrams/kyc-bo-rescreening.dmn` to see how the three decisions connect — double-click any decision node to inspect its full rule set
+4. **View the process:** Open `diagrams/kyc-bo-rescreening.bpmn` to see the end-to-end BPMN workflow — expand the EDD sub-process to see the internal steps
+5. **Quick preview:** The SVG files (`diagrams/kyc-bo-rescreening_DMN.svg` and `diagrams/kyc-bo-rescreening_BPMN.svg`) render directly on GitHub for a quick visual overview
 
 ### What to Look For
 
