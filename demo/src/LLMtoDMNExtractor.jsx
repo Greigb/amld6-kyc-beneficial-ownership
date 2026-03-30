@@ -44,6 +44,111 @@ const statusColors = {
   rejected: { bg: "#2e1a1a", border: "#6a2d2d", text: "#d9534f", label: "Rejected" },
 };
 
+// ---------------------------------------------------------------------------
+// DMN XML generator — converts validated rules into a Camunda-compatible
+// DMN 1.3 decision table that can be opened directly in Camunda Modeler.
+// ---------------------------------------------------------------------------
+function generateDmnXml(approvedRules) {
+  const escXml = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+  // Collect unique input columns from all approved rules
+  const inputFields = new Map();
+  for (const rule of approvedRules) {
+    for (const c of rule.conditions || []) {
+      if (!inputFields.has(c.field)) {
+        inputFields.set(c.field, { field: c.field, type: typeof c.value === "boolean" ? "boolean" : typeof c.value === "number" ? "number" : "string" });
+      }
+    }
+  }
+  const inputs = [...inputFields.values()];
+
+  const feelType = (t) => (t === "number" ? "number" : t === "boolean" ? "boolean" : "string");
+
+  // Build input clauses
+  const inputClauses = inputs.map((inp, i) =>
+    `      <input id="Input_${i + 1}" label="${escXml(inp.field)}">
+        <inputExpression id="InputExpr_${i + 1}" typeRef="${feelType(inp.type)}">
+          <text>${escXml(inp.field)}</text>
+        </inputExpression>
+      </input>`
+  ).join("\n");
+
+  // Build output clauses
+  const outputClauses =
+    `      <output id="Output_1" label="cddLevel" typeRef="string" />
+      <output id="Output_2" label="entityScope" typeRef="string" />
+      <output id="Output_3" label="linkedTransactions" typeRef="boolean" />`;
+
+  // Build rules
+  const ruleRows = approvedRules.map((rule, ri) => {
+    // For each input column, find the matching condition in this rule
+    const inputEntries = inputs.map((inp, ci) => {
+      const cond = (rule.conditions || []).find(c => c.field === inp.field);
+      let expression = "";
+      if (cond) {
+        if (typeof cond.value === "boolean") {
+          expression = String(cond.value);
+        } else if (typeof cond.value === "number") {
+          expression = `${cond.operator} ${cond.value}`;
+        } else {
+          expression = `"${escXml(String(cond.value))}"`;
+        }
+      }
+      return `        <inputEntry id="IE_${ri + 1}_${ci + 1}"><text>${expression || ""}</text></inputEntry>`;
+    }).join("\n");
+
+    const outputEntries =
+      `        <outputEntry id="OE_${ri + 1}_1"><text>"${escXml(rule.cdd_level || "STANDARD")}"</text></outputEntry>
+        <outputEntry id="OE_${ri + 1}_2"><text>"${escXml(rule.entity_scope || "all")}"</text></outputEntry>
+        <outputEntry id="OE_${ri + 1}_3"><text>${rule.linked_transactions ? "true" : "false"}</text></outputEntry>`;
+
+    return `      <rule id="Rule_${ri + 1}">
+        <description>${escXml(rule.source + " — " + rule.description)}</description>
+${inputEntries}
+${outputEntries}
+      </rule>`;
+  }).join("\n");
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="https://www.omg.org/spec/DMN/20191111/MODEL/"
+             xmlns:dmndi="https://www.omg.org/spec/DMN/20191111/DMNDI/"
+             xmlns:dc="http://www.omg.org/spec/DMN/20180521/DC/"
+             xmlns:camunda="http://camunda.org/schema/1.0/dmn"
+             id="Definitions_LLMExtracted"
+             name="LLM-Extracted CDD Triggers"
+             namespace="http://camunda.org/schema/1.0/dmn">
+
+  <decision id="Decision_CddTriggers" name="CDD Trigger Conditions (LLM-Extracted)">
+    <decisionTable id="DecisionTable_1" hitPolicy="FIRST">
+${inputClauses}
+${outputClauses}
+${ruleRows}
+    </decisionTable>
+  </decision>
+
+  <dmndi:DMNDI>
+    <dmndi:DMNDiagram>
+      <dmndi:DMNShape dmnElementRef="Decision_CddTriggers">
+        <dc:Bounds height="80" width="180" x="160" y="100" />
+      </dmndi:DMNShape>
+    </dmndi:DMNDiagram>
+  </dmndi:DMNDI>
+</definitions>
+`;
+}
+
+function downloadFile(content, filename, mimeType) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 const RuleCard = ({ rule, onStatusChange, onNoteChange }) => {
   const status = statusColors[rule._status || "pending"];
   const [expanded, setExpanded] = useState(false);
@@ -103,7 +208,7 @@ const RuleCard = ({ rule, onStatusChange, onNoteChange }) => {
               fontFamily: "'IBM Plex Mono', monospace",
               transition: "all 0.15s ease",
             }}>
-              {s === "approved" ? "✓" : s === "flagged" ? "⚠" : "✕"}
+              {s === "approved" ? "\u2713" : s === "flagged" ? "\u26A0" : "\u2715"}
             </button>
           ))}
         </div>
@@ -118,7 +223,7 @@ const RuleCard = ({ rule, onStatusChange, onNoteChange }) => {
         padding: "6px 0 0",
         fontFamily: "'IBM Plex Mono', monospace",
       }}>
-        {expanded ? "▾ Hide details" : "▸ Show conditions & logic"}
+        {expanded ? "\u25BE Hide details" : "\u25B8 Show conditions & logic"}
       </button>
 
       {expanded && (
@@ -193,6 +298,7 @@ export default function LLMtoDMNExtractor() {
   const [phase, setPhase] = useState("input"); // input, extracting, review, summary
   const [error, setError] = useState(null);
   const [progress, setProgress] = useState("");
+  const [dmnPreview, setDmnPreview] = useState(null);
 
   const extractRules = useCallback(async () => {
     setPhase("extracting");
@@ -200,9 +306,17 @@ export default function LLMtoDMNExtractor() {
     setProgress("Sending regulatory text to LLM extraction agent...");
 
     try {
+      const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
+      if (!apiKey) throw new Error("VITE_ANTHROPIC_API_KEY not set — add it to demo/.env");
+
       const response = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
         body: JSON.stringify({
           model: "claude-sonnet-4-20250514",
           max_tokens: 4000,
@@ -264,6 +378,14 @@ export default function LLMtoDMNExtractor() {
 
   const allReviewed = stats.pending === 0 && stats.total > 0;
 
+  const handleExportDmn = () => {
+    const approved = rules.filter(r => r._status === "approved");
+    if (approved.length === 0) return;
+    const xml = generateDmnXml(approved);
+    setDmnPreview(xml);
+    downloadFile(xml, "cdd-triggers-extracted.dmn", "application/xml");
+  };
+
   return (
     <div style={{
       minHeight: "100vh",
@@ -285,13 +407,13 @@ export default function LLMtoDMNExtractor() {
             background: "linear-gradient(135deg, #4a6aaa, #2a4a8a)",
             display: "flex", alignItems: "center", justifyContent: "center",
             fontSize: 18, fontWeight: 700, color: "#fff",
-          }}>⚖</div>
+          }}>&#x2696;</div>
           <div>
             <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: "#e0e0f0", letterSpacing: "-0.02em" }}>
-              LLM → DMN Extraction Agent
+              LLM &rarr; DMN Extraction Agent
             </h1>
             <p style={{ margin: 0, fontSize: 12, color: "#6666aa", fontFamily: "'IBM Plex Mono', monospace" }}>
-              Regulatory text → Structured rules → Human validation → Production DMN
+              Regulatory text &rarr; Structured rules &rarr; Human validation &rarr; Production DMN
             </p>
           </div>
         </div>
@@ -302,11 +424,11 @@ export default function LLMtoDMNExtractor() {
         {/* Phase indicator */}
         <div style={{ display: "flex", gap: 0, marginBottom: 28 }}>
           {[
-            { id: "input", label: "1. Input", icon: "📄" },
-            { id: "extracting", label: "2. Extract", icon: "🤖" },
-            { id: "review", label: "3. Validate", icon: "🔍" },
-            { id: "summary", label: "4. Export", icon: "✓" },
-          ].map((step, i) => {
+            { id: "input", label: "1. Input", icon: "\uD83D\uDCC4" },
+            { id: "extracting", label: "2. Extract", icon: "\uD83E\uDD16" },
+            { id: "review", label: "3. Validate", icon: "\uD83D\uDD0D" },
+            { id: "summary", label: "4. Export", icon: "\u2713" },
+          ].map((step) => {
             const phases = ["input", "extracting", "review", "summary"];
             const current = phases.indexOf(phase);
             const stepIdx = phases.indexOf(step.id);
@@ -458,7 +580,7 @@ export default function LLMtoDMNExtractor() {
                   Validate Extracted Rules
                 </h2>
                 <p style={{ fontSize: 12, color: "#6666aa", marginBottom: 16, fontFamily: "'IBM Plex Mono', monospace" }}>
-                  Review each rule. Approve ✓, Flag ⚠ for edit, or Reject ✕. Expand for conditions and notes.
+                  Review each rule. Approve &#x2713;, Flag &#x26A0; for edit, or Reject &#x2715;. Expand for conditions and notes.
                 </p>
 
                 {rules.map(rule => (
@@ -482,9 +604,9 @@ export default function LLMtoDMNExtractor() {
                     cursor: allReviewed ? "pointer" : "not-allowed",
                     fontFamily: "'IBM Plex Mono', monospace",
                   }}>
-                    {allReviewed ? "Generate Validation Report →" : `${stats.pending} rules still pending review`}
+                    {allReviewed ? "Generate Validation Report \u2192" : `${stats.pending} rules still pending review`}
                   </button>
-                  <button onClick={() => { setPhase("input"); setRules([]); setError(null); }} style={{
+                  <button onClick={() => { setPhase("input"); setRules([]); setError(null); setDmnPreview(null); }} style={{
                     background: "transparent",
                     border: "1px solid #3a3a5e",
                     color: "#8888aa",
@@ -494,7 +616,7 @@ export default function LLMtoDMNExtractor() {
                     cursor: "pointer",
                     fontFamily: "'IBM Plex Mono', monospace",
                   }}>
-                    ← Start Over
+                    &larr; Start Over
                   </button>
                 </div>
               </>
@@ -547,9 +669,24 @@ export default function LLMtoDMNExtractor() {
                     padding: 20,
                     marginBottom: 16,
                   }}>
-                    <h3 style={{ fontSize: 14, color: "#a0b8e0", marginTop: 0, marginBottom: 12, fontFamily: "'IBM Plex Mono', monospace" }}>
-                      Validated Rules → Ready for DMN Export
-                    </h3>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                      <h3 style={{ fontSize: 14, color: "#a0b8e0", margin: 0, fontFamily: "'IBM Plex Mono', monospace" }}>
+                        Validated Rules &rarr; Ready for DMN Export
+                      </h3>
+                      <button onClick={handleExportDmn} style={{
+                        background: "linear-gradient(135deg, #3a5a9a, #2a4a8a)",
+                        border: "none",
+                        color: "#e0e8f0",
+                        padding: "8px 18px",
+                        borderRadius: 6,
+                        fontSize: 12,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        fontFamily: "'IBM Plex Mono', monospace",
+                      }}>
+                        Download .dmn File
+                      </button>
+                    </div>
                     <div style={{ overflowX: "auto" }}>
                       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, fontFamily: "'IBM Plex Mono', monospace" }}>
                         <thead>
@@ -568,15 +705,50 @@ export default function LLMtoDMNExtractor() {
                               <td style={{ padding: "8px 10px", borderBottom: "1px solid #1a1a3e", color: "#a0c0e0" }}>
                                 {r.conditions && r.conditions.length > 0
                                   ? r.conditions.map(c => `${c.field} ${c.operator} ${c.value}${c.unit ? " " + c.unit : ""}`).join(" AND ")
-                                  : "—"}
+                                  : "\u2014"}
                               </td>
                               <td style={{ padding: "8px 10px", borderBottom: "1px solid #1a1a3e", color: r.cdd_level === "ENHANCED" ? "#e8a838" : r.cdd_level === "LIMITED" ? "#6688cc" : "#5cb85c" }}>{r.cdd_level}</td>
-                              <td style={{ padding: "8px 10px", borderBottom: "1px solid #1a1a3e", color: "#c0c0d8" }}>{r.linked_transactions ? "✓" : "—"}</td>
+                              <td style={{ padding: "8px 10px", borderBottom: "1px solid #1a1a3e", color: "#c0c0d8" }}>{r.linked_transactions ? "\u2713" : "\u2014"}</td>
                             </tr>
                           ))}
                         </tbody>
                       </table>
                     </div>
+                  </div>
+                )}
+
+                {/* DMN XML Preview */}
+                {dmnPreview && (
+                  <div style={{
+                    background: "#0a0a18",
+                    border: "1px solid #2a2a4e",
+                    borderRadius: 8,
+                    padding: 20,
+                    marginBottom: 16,
+                  }}>
+                    <h3 style={{ fontSize: 14, color: "#a0b8e0", marginTop: 0, marginBottom: 12, fontFamily: "'IBM Plex Mono', monospace" }}>
+                      Generated DMN XML Preview
+                    </h3>
+                    <p style={{ fontSize: 11, color: "#6666aa", marginBottom: 10, fontFamily: "'IBM Plex Mono', monospace" }}>
+                      Open this file in Camunda Modeler to inspect and refine the decision table.
+                    </p>
+                    <pre style={{
+                      background: "#06061a",
+                      border: "1px solid #1a1a3e",
+                      borderRadius: 6,
+                      padding: 16,
+                      fontSize: 11,
+                      color: "#8888cc",
+                      fontFamily: "'IBM Plex Mono', monospace",
+                      overflowX: "auto",
+                      maxHeight: 320,
+                      overflowY: "auto",
+                      lineHeight: 1.5,
+                      margin: 0,
+                      whiteSpace: "pre",
+                    }}>
+                      {dmnPreview}
+                    </pre>
                   </div>
                 )}
 
@@ -595,7 +767,7 @@ export default function LLMtoDMNExtractor() {
                     {rules.filter(r => r._status === "flagged").map(r => (
                       <div key={r.rule_id} style={{ marginBottom: 10, paddingBottom: 10, borderBottom: "1px solid #2a2a1a" }}>
                         <span style={{ color: "#6688cc", fontSize: 12 }}>{r.rule_id}</span>
-                        <span style={{ color: "#8888aa", fontSize: 12 }}> — {r.description}</span>
+                        <span style={{ color: "#8888aa", fontSize: 12 }}> &mdash; {r.description}</span>
                         {r._note && <p style={{ color: "#e8c838", fontSize: 12, margin: "4px 0 0", fontStyle: "italic" }}>Note: {r._note}</p>}
                       </div>
                     ))}
@@ -614,25 +786,41 @@ export default function LLMtoDMNExtractor() {
                   <div style={{ fontSize: 13, color: "#a0a0c0", lineHeight: 1.8 }}>
                     <p style={{ margin: "0 0 8px" }}>1. Correct flagged rules and re-validate</p>
                     <p style={{ margin: "0 0 8px" }}>2. Check for missing implicit rules (e.g., below-threshold CASP obligations)</p>
-                    <p style={{ margin: "0 0 8px" }}>3. Select appropriate DMN hit policy (FIRST recommended for this table)</p>
-                    <p style={{ margin: "0 0 8px" }}>4. Generate DMN XML and validate FEEL expressions in Camunda Modeler</p>
+                    <p style={{ margin: "0 0 8px" }}>3. Verify hit policy selection (FIRST recommended for this table)</p>
+                    <p style={{ margin: "0 0 8px" }}>4. Open the downloaded .dmn in Camunda Modeler to inspect FEEL expressions</p>
                     <p style={{ margin: 0 }}>5. Wire into DRD and test with scenario data</p>
                   </div>
                 </div>
 
-                <button onClick={() => setPhase("review")} style={{
-                  background: "transparent",
-                  border: "1px solid #3a3a5e",
-                  color: "#8888aa",
-                  padding: "12px 20px",
-                  borderRadius: 8,
-                  fontSize: 13,
-                  cursor: "pointer",
-                  fontFamily: "'IBM Plex Mono', monospace",
-                  marginTop: 16,
-                }}>
-                  ← Back to Review
-                </button>
+                <div style={{ display: "flex", gap: 12, marginTop: 16 }}>
+                  <button onClick={() => setPhase("review")} style={{
+                    background: "transparent",
+                    border: "1px solid #3a3a5e",
+                    color: "#8888aa",
+                    padding: "12px 20px",
+                    borderRadius: 8,
+                    fontSize: 13,
+                    cursor: "pointer",
+                    fontFamily: "'IBM Plex Mono', monospace",
+                  }}>
+                    &larr; Back to Review
+                  </button>
+                  {stats.approved > 0 && !dmnPreview && (
+                    <button onClick={handleExportDmn} style={{
+                      background: "linear-gradient(135deg, #3a5a9a, #2a4a8a)",
+                      border: "none",
+                      color: "#e0e8f0",
+                      padding: "12px 28px",
+                      borderRadius: 8,
+                      fontSize: 14,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      fontFamily: "'IBM Plex Mono', monospace",
+                    }}>
+                      Export as DMN XML
+                    </button>
+                  )}
+                </div>
               </div>
             )}
           </div>

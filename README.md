@@ -175,7 +175,12 @@ amld6-kyc-beneficial-ownership/
 │   ├── test-scenarios.md                     ← 6 worked examples showing end-to-end decision chain
 │   └── llm-to-dmn-extraction-poc.md          ← LLM extraction pipeline PoC with validation analysis
 │
-└── llm-to-dmn-demo.jsx                       ← Interactive React demo of the extraction & validation UI
+└── demo/                                      ← Interactive React demo (Vite + React 18)
+    ├── README.md                              ← Setup & usage instructions
+    ├── package.json
+    ├── .env.example                           ← API key configuration
+    └── src/
+        └── LLMtoDMNExtractor.jsx             ← Extraction UI with DMN XML export
 ```
 
 ---
@@ -345,12 +350,16 @@ This project includes a proof of concept for semi-automated regulatory extractio
 
 ### Interactive Demo
 
-[`llm-to-dmn-demo.jsx`](llm-to-dmn-demo.jsx) is a working React application that demonstrates the extraction and validation workflow:
+The [`demo/`](demo/) folder contains a runnable React application (Vite + React 18) that demonstrates the extraction and validation workflow:
+
+```bash
+cd demo && npm install && npm run dev
+```
 
 - **Input** — Paste any regulatory text (pre-loaded with Article 19)
-- **Extract** — Calls Claude API to extract rules as structured JSON
-- **Validate** — Approve ✓, flag ⚠, or reject ✕ each rule; expand for conditions; add validation notes
-- **Export** — Generates a validation report with accuracy statistics and a DMN-ready table
+- **Extract** — Calls Claude API to extract rules as structured JSON (or click "Load Sample Data" to skip)
+- **Validate** — Approve, flag, or reject each rule; expand for conditions; add validation notes
+- **Export** — Generates a validation report with accuracy statistics and downloads a Camunda-compatible `.dmn` file
 
 ### Why This Matters
 
