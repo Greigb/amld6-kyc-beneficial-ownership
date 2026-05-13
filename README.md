@@ -271,7 +271,7 @@ The LLM gets you ~60-70% of the way to production-ready DMN. The remaining 30-40
 
 ## Scaling the Extraction Pipeline
 
-The PoC made five error categories visible: context loss, missing implicit rules, operator imprecision, hit-policy choice, and missing deltas from the prior regime. Each of the four techniques below closes one of those categories. Stacked, they turn one-shot extraction into a pipeline that scales across a regulation portfolio and improves with use.
+The PoC's Article 19 walkthrough surfaced five error categories: missing implicit rules, operator precision, CDD level qualification pending AMLA RTS, missing change detection from the prior regime, and hit-policy choice. Four of these are LLM-extraction problems the techniques below address; the fifth — CDD level qualification — is a regulatory dependency waiting on AMLA RTS, not a model problem. A further extraction failure observed during the walkthrough, context loss between cited articles, is what the first technique fixes. Stacked, the techniques turn one-shot extraction into a pipeline that scales across a regulation portfolio and improves with use.
 
 ### 01 · Retrieval — Hierarchical RAG
 
@@ -333,7 +333,7 @@ graph TB
 
 *One narrow job per agent.*
 
-A single extractor model is a generalist. Decompose by failure mode: each of the five error categories from the PoC gets its own specialist agent, all feeding a judge that gates the output. Each agent has a measurable success rate you can improve independently — and a small fine-tuned model often beats a frontier LLM at narrow tasks like operator parsing.
+A single extractor model is a generalist. Decompose by failure mode: each LLM-tractable error category gets its own specialist agent, all feeding a judge that gates the output. Each agent has a measurable success rate you can improve independently — and a small fine-tuned model often beats a frontier LLM at narrow tasks like operator parsing.
 
 ```mermaid
 flowchart TB
@@ -357,7 +357,7 @@ flowchart TB
 
 | Fixes | Bonus |
 |---|---|
-| Each of the five PoC error classes gets its own specialist with its own eval set. | Small fine-tuned models often beat a frontier LLM at narrow tasks like operator parsing. |
+| Each LLM-tractable error class — including context loss — gets its own specialist with its own eval set. | Small fine-tuned models often beat a frontier LLM at narrow tasks like operator parsing. |
 
 ### 04 · Evolution — The Self-Sustaining Loop
 
