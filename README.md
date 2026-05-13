@@ -413,7 +413,3 @@ This model covers the core re-screening workflow and extraction pipeline. Natura
 ## Author
 
 Built as a demonstration of decomposing financial regulation into executable DMN decision logic and BPMN process automation — bridging the gap between compliance policy and technology implementation. Includes a proof of concept for LLM-assisted regulatory extraction with human validation, reflecting the emerging workflow for encoding regulations at scale.
-
-## License
-
-MIT
