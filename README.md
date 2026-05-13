@@ -1,6 +1,6 @@
 # KYC Beneficial Ownership Re-screening — EU AML Package (AMLR / AMLD6)
 
-> A Camunda BPMN + DMN showcase modelling how a CIB bank would operationalise the EU's 2024 Anti-Money Laundering regulatory overhaul into executable decision logic and process automation — including an LLM-to-DMN extraction proof of concept demonstrating how regulatory text can be semi-automatically decomposed into validated decision tables.
+> A Camunda BPMN + DMN showcase modelling how a CIB bank operationalises the EU's 2024 Anti-Money Laundering overhaul (AMLR / AMLD6) into executable decision logic. Includes an LLM-to-DMN extraction proof of concept — and an architectural sketch of how that pipeline scales across a regulation portfolio.
 
 ---
 
@@ -8,9 +8,7 @@
 
 On 31 May 2024, the EU adopted a comprehensive overhaul of its AML/CFT framework — replacing the directive-based approach with a directly applicable regulation for the first time. For Commercial & Investment Banking, this means every existing client relationship must be re-evaluated against updated beneficial ownership rules, new CDD thresholds, and harmonised EDD triggers before the **10 July 2027** application date.
 
-This project models that re-screening process end-to-end: from regulatory change trigger through to updated KYC records and ongoing monitoring schedules. It demonstrates how regulatory language can be decomposed into **structured, auditable, executable decision logic** using DMN, orchestrated by a BPMN process.
-
-The project also includes an **LLM-to-DMN extraction proof of concept** — showing how an LLM agent can pre-extract decision rules from regulatory text, with a DMN Modeller validating and correcting the output. This reflects the emerging workflow where LLM-assisted extraction scales regulatory encoding across large policy landscapes, with human expertise as the quality gate.
+The project models that re-screening process end-to-end: from regulatory change trigger to updated KYC records and ongoing monitoring schedule, with three linked DMN tables encoding the rules and a BPMN process orchestrating the work. It also includes an LLM-to-DMN extraction proof of concept showing how regulatory text can be semi-automatically decomposed into validated decision tables — with the DMN Modeller as the quality gate, not the bottleneck. The four-layer architecture below extends that PoC into a pipeline that can keep up with a regulation portfolio as it evolves.
 
 ---
 
@@ -268,6 +266,125 @@ cd demo && npm install && npm run dev
 ### Why This Matters
 
 The LLM gets you ~60-70% of the way to production-ready DMN. The remaining 30-40% — missing implicit rules, operator precision, hit policy selection, cross-reference handling, edge cases — is precisely where DMN Modeller expertise adds irreplaceable value. The pipeline scales regulatory encoding; the human expert makes it trustworthy.
+
+---
+
+## Scaling the Extraction Pipeline
+
+The PoC made five error categories visible: context loss, missing implicit rules, operator imprecision, hit-policy choice, and missing deltas from the prior regime. Each of the four techniques below closes one of those categories. Stacked, they turn one-shot extraction into a pipeline that scales across a regulation portfolio and improves with use.
+
+### 01 · Retrieval — Hierarchical RAG
+
+*Preserves the document's spine.*
+
+Fixed-size chunking shreds a regulation's structure. Instead, chunk along the natural hierarchy — Article → Paragraph → Subparagraph — and tag every chunk with metadata. At query time, retrieve the target plus its definitions and the articles it cites. This is what would have stopped the Article 19 walkthrough from missing Article 2's definition of "occasional transaction" and Article 18's prior-regime context.
+
+```mermaid
+flowchart LR
+    Doc["AMLR<br/>full text"] --> Chunker{{"Hierarchical<br/>chunker"}}
+    Chunker --> C1["Art 19 §1<br/><i>refs: Art 18, Art 2</i>"]
+    Chunker --> C2["Art 19 §2<br/><i>thresholds: €10k</i>"]
+    Chunker --> C3["Art 2 def:<br/>'occasional txn'"]
+    Chunker --> C4["Art 18<br/>prior regime"]
+    C1 --> V[("Vector store<br/>+ metadata")]
+    C2 --> V
+    C3 --> V
+    C4 --> V
+    Q["Extract<br/>Article 19"] --> R{{"Retriever"}}
+    V --> R
+    R --> L["LLM<br/>extractor"]
+```
+
+| Fixes | Doesn't fix |
+|---|---|
+| Context-loss errors — extraction missing cited definitions or referenced articles. | Implicit rules, operator precision, hit-policy choice — these aren't a retrieval problem. |
+
+### 02 · Structure — Graph RAG
+
+*Regulation is a typed graph, not a pile of text.*
+
+Articles define terms, modify thresholds, supersede prior rules, and cross-reference each other. Model that explicitly. Now the LLM doesn't just see Article 19 — it sees the *relationships* Article 19 has to everything around it. This is what catches the "missing delta from prior regime" and "implicit rule" errors from the PoC.
+
+```mermaid
+graph TB
+    A19(["<b>Article 19</b><br/>CDD triggers<br/>AMLR 2024"])
+    A18(["Article 18<br/>prior CDD scope"])
+    A2(["Article 2<br/>Definitions"])
+    T10K[["€10,000<br/>new threshold"]]
+    T15K[["€15,000<br/>SUPERSEDED"]]
+    DEF["'occasional<br/>transaction'"]
+    DA{{"Delegated Act<br/>15% high-risk"}}
+    AMLD6(["AMLD6<br/>national<br/>transposition"])
+
+    A19 -- supersedes --> T15K
+    A19 -- introduces --> T10K
+    A19 -- uses --> DEF
+    DEF -- defined_in --> A2
+    A19 -- references --> A18
+    A19 -- transposed_by --> AMLD6
+    A19 -- modifiable_by --> DA
+```
+
+| Fixes | Implementation |
+|---|---|
+| Implicit rules surface via traversal. Comparing Art 19 ↔ Art 18 reveals what changed. | Neo4j or any property graph; node embeddings give you semantic + structural search. |
+
+### 03 · Specialisation — Multi-Agent Review
+
+*One narrow job per agent.*
+
+A single extractor model is a generalist. Decompose by failure mode: each of the five error categories from the PoC gets its own specialist agent, all feeding a judge that gates the output. Each agent has a measurable success rate you can improve independently — and a small fine-tuned model often beats a frontier LLM at narrow tasks like operator parsing.
+
+```mermaid
+flowchart TB
+    Src["Regulatory text<br/>+ graph context"] --> Ext["Extractor<br/>(candidate rules)"]
+    Ext --> CR["Cross-reference<br/>walks the graph"]
+    Ext --> OP["Operator precision<br/>'>= vs >', 'shall' vs 'may'"]
+    Ext --> IR["Implicit-rule<br/>adversarial probe"]
+    Ext --> HP["Hit-policy<br/>FIRST / PRIORITY / COLLECT"]
+    Ext --> DT["Delta-vs-prior<br/>regime comparator"]
+
+    CR --> J{{"Judge<br/>+ consensus<br/>+ confidence score"}}
+    OP --> J
+    IR --> J
+    HP --> J
+    DT --> J
+
+    J -->|"high conf."| DMN[("Validated<br/>DMN rule")]
+    J -->|"low conf."| H["Human<br/>reviewer"]
+    H --> DMN
+```
+
+| Fixes | Bonus |
+|---|---|
+| Each of the five PoC error classes gets its own specialist with its own eval set. | Small fine-tuned models often beat a frontier LLM at narrow tasks like operator parsing. |
+
+### 04 · Evolution — The Self-Sustaining Loop
+
+*Humans review diffs, not documents.*
+
+Once the pipeline exists, regulation changes become events. New RTS or delegated act drops → diff the graph → re-extract only the affected subgraph → run the test scenarios as regression. Humans are pulled in only when scenario outcomes change. Their corrections become labelled training data, and the system gets better the more it's used.
+
+```mermaid
+flowchart LR
+    Feed[/"EUR-Lex · AMLA<br/>regulatory feeds"/] --> Mon["Monitor"]
+    Mon -->|"new RTS /<br/>delegated act"| Diff["Graph diff<br/>→ affected subgraph"]
+    Diff --> Pipe{{"Multi-agent<br/>pipeline (§3)"}}
+    Pipe --> Cand["Candidate<br/>DMN update"]
+    Cand --> Reg["Regression test<br/>vs scenarios"]
+    Reg -->|"outcomes<br/>unchanged"| Auto["Auto-deploy"]
+    Reg -->|"outcomes<br/>changed"| Rev["Human review"]
+    Rev -->|"corrections"| Train[("Labelled<br/>examples")]
+    Train -.->|"continuous<br/>improvement"| Pipe
+    Auto --> Prod[("Production<br/>DMN")]
+    Rev --> Prod
+```
+
+| Key idea | Feedback loop |
+|---|---|
+| Trigger human review on *test-scenario outcome change*, not on text change. That's how you scale across a regulation portfolio. | Human corrections are the gold standard. Capture them as labelled pairs and they upgrade every future extraction. |
+
+> RAG fixes context. Graph RAG fixes structure. Multi-agent fixes specialisation. The loop fixes time. Each addresses a failure mode the PoC made visible; together they turn extraction into an institution that learns.
 
 ---
 
